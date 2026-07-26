@@ -1,0 +1,3 @@
+# Keep LF in the repository. Development happens on Windows, but the Unix build
+# tags and shell snippets are part of the project and should not acquire CRLF.
+* text=auto eol=lf

@@ -1,0 +1,11 @@
+# Session logs contain the full, unredacted contents of every tool call and
+# every tool result: file contents, API responses, tokens the agent happened to
+# read. Treat them like a password file. Never commit them.
+*.jsonl
+/corpus/
+
+# Build output. Anchored with a leading slash: an unanchored "mcp-guard" also
+# matches the cmd/mcp-guard/ directory and silently drops the entry point.
+/dist/
+/mcp-guard
+/mcp-guard.exe
