@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
 )
 
@@ -254,6 +255,63 @@ func TestRotation(t *testing.T) {
 	}
 	if len(seen) != records {
 		t.Errorf("recovered %d records across %d files, want %d", len(seen), len(files), records)
+	}
+}
+
+// TestCorpusParses runs the parser over a real recorded session. It is skipped
+// unless MCPGUARD_CORPUS points at one, because the corpus is machine-specific
+// and never committed:
+//
+//	MCPGUARD_CORPUS=~/.mcp-guard/session.jsonl go test ./internal/proxy/
+//
+// This is the cheap half of the replay harness: every message the parser cannot
+// classify is a message stage 3 would have to make a policy decision about
+// blind.
+func TestCorpusParses(t *testing.T) {
+	path := os.Getenv("MCPGUARD_CORPUS")
+	if path == "" {
+		t.Skip("set MCPGUARD_CORPUS to a session log to run this")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), 64<<20)
+
+	var records, parsed int
+	kinds := map[string]int{}
+	for line := 1; sc.Scan(); line++ {
+		var rec struct {
+			Ev  string          `json:"ev"`
+			Dir string          `json:"dir"`
+			Msg json.RawMessage `json:"msg"`
+		}
+		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
+			t.Fatalf("%s:%d is not valid JSONL: %v", path, line, err)
+		}
+		if rec.Ev != "" || len(rec.Msg) == 0 {
+			continue
+		}
+		records++
+		msgs, _, err := mcp.ParseFrame(rec.Msg)
+		if err != nil {
+			t.Errorf("%s:%d (%s) did not parse: %v\n  %s", path, line, rec.Dir, err, rec.Msg)
+			continue
+		}
+		parsed++
+		for _, m := range msgs {
+			kinds[rec.Dir+" "+m.Kind.String()]++
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan corpus: %v", err)
+	}
+	t.Logf("parsed %d/%d recorded messages", parsed, records)
+	for k, n := range kinds {
+		t.Logf("  %-18s %d", k, n)
 	}
 }
 
