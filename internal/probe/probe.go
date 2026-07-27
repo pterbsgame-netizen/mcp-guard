@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
@@ -45,8 +46,11 @@ func Run(ctx context.Context, argv, env []string, timeout time.Duration) (*Resul
 
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Env = env
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// os/exec copies the child's stderr on a goroutine of its own, which runs
+	// until the process is reaped. A plain bytes.Buffer read while that is
+	// still going is a data race, and every path out of this function reads it.
+	stderr := &lockedBuffer{}
+	cmd.Stderr = stderr
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -195,16 +199,38 @@ func (s *session) call(ctx context.Context, id int, method string, params any) (
 }
 
 // close shuts the server down: EOF on stdin first, then force.
+//
+// cmd.Wait, not Process.Wait: the former also waits for os/exec's own copying
+// goroutines to finish, and the latter leaves them running against buffers the
+// caller is about to read.
 func (s *session) close() {
 	if c, ok := s.in.(interface{ Close() error }); ok {
 		_ = c.Close()
 	}
 	done := make(chan struct{})
-	go func() { _, _ = s.cmd.Process.Wait(); close(done) }()
+	go func() { _ = s.cmd.Wait(); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		_ = s.cmd.Process.Kill()
 		<-done
 	}
+}
+
+// lockedBuffer is a bytes.Buffer that can be read while it is being written.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
 }
