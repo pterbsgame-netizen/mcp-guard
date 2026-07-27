@@ -9,3 +9,17 @@
 /dist/
 /mcp-guard
 /mcp-guard.exe
+
+# Baselines and locks produced by running the tool against this machine.
+#
+# This is not advice to leave yours uncommitted - the whole point of a lock file
+# is that it sits in the repository it guards, so a changed tool or a rewritten
+# config shows up in review. It is about which repository. A baseline scoped to
+# a *project* covers that project's .cursor/mcp.json and belongs in it. One
+# scoped to a *machine* covers %APPDATA%\Claude and ~/.claude.json, and records
+# the directory layout and the list of servers its owner runs.
+#
+# Anything generated here is the second kind, produced while testing, so it is
+# ignored rather than published.
+/mcp-guard.configs.lock
+/mcp-guard.lock

@@ -195,6 +195,15 @@ their values never are, because this file belongs in a repository.
 Keep the baseline in a repository rather than beside the configs it guards: one
 stored next to what it protects is editable by whoever edits that.
 
+Which repository matters, though, and the two cases are not the same. A baseline
+scoped to a **project** covers that project's `.cursor/mcp.json` and belongs in
+it, where a change shows up in review like any other. One scoped to a **machine**
+covers `%APPDATA%\Claude` and `~/.claude.json`, and records its owner's
+directory layout and the list of servers they run — worth keeping under version
+control somewhere private, and worth thinking about before it goes anywhere
+public. This repository ignores both, because anything generated here is the
+second kind.
+
 ### Reading a session back
 
 ```bash
