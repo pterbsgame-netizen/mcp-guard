@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,12 +37,11 @@ func TestCurXecute(t *testing.T) {
 	}
 	p := Default()
 
-	// Every one of these reaches the same file.
+	// Every one of these reaches the same file, on every platform.
 	spellings := []string{
 		filepath.Join(home, ".cursor", "mcp.json"),
 		filepath.Join("~", ".cursor", "mcp.json"),
 		filepath.Join(home, "projects", "..", ".cursor", "mcp.json"),
-		filepath.Join(home, ".CURSOR", "MCP.JSON"),
 	}
 	for _, path := range spellings {
 		t.Run(path, func(t *testing.T) {
@@ -56,6 +56,33 @@ func TestCurXecute(t *testing.T) {
 				t.Error("the verdict did not say which path it was about")
 			}
 		})
+	}
+}
+
+// TestCaseFollowsTheFilesystem: on Windows and macOS ~/.CURSOR/MCP.JSON is the
+// same file as ~/.cursor/mcp.json and has to be refused. On Linux it is a
+// different file that no client will ever read, and refusing it would be a
+// false positive invented out of nothing.
+//
+// This is why folding is decided per platform instead of lowercasing
+// everything, and CI on Linux is what proves the distinction is real.
+func TestCaseFollowsTheFilesystem(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	shouted := filepath.Join(home, ".CURSOR", "MCP.JSON")
+
+	want := Allow
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		want = Deny
+	}
+	v := Default().Decide(Call{
+		Tool: "write_file",
+		Args: args(t, map[string]any{"path": shouted, "content": "{}"}),
+	}, false)
+	if v.Action != want {
+		t.Errorf("%s on %s: action = %q, want %q", shouted, runtime.GOOS, v.Action, want)
 	}
 }
 
@@ -195,7 +222,7 @@ func TestPathsFoundAnywhereInArguments(t *testing.T) {
 func TestRelativePathsMatchUnanchoredRules(t *testing.T) {
 	p := Default()
 	// The server's working directory is its own business and we do not know
-	// it, so an anchored rule cannot apply — but "a file called .env, wherever
+	// it, so an anchored rule cannot apply вЂ” but "a file called .env, wherever
 	// it is" still can.
 	v := p.Decide(Call{
 		Tool: "read_text_file",
