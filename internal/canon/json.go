@@ -23,9 +23,23 @@ import (
 	"unicode/utf16"
 )
 
+// bom is the UTF-8 byte order mark.
+var bom = []byte{0xEF, 0xBB, 0xBF}
+
+// TrimBOM removes a leading UTF-8 byte order mark.
+//
+// JSON parsers reject it — RFC 8259 does not allow one — but Windows produces
+// it constantly: PowerShell's Set-Content -Encoding utf8 writes one, and so
+// does Notepad's "UTF-8 with BOM". A config file saved that way would fail to
+// parse, and a security check that errors out instead of checking is a check an
+// attacker can disable by prepending three bytes.
+func TrimBOM(b []byte) []byte {
+	return bytes.TrimPrefix(b, bom)
+}
+
 // JSON returns the canonical encoding of raw.
 func JSON(raw []byte) ([]byte, error) {
-	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec := json.NewDecoder(bytes.NewReader(TrimBOM(raw)))
 	// Numbers are kept as text until the last moment so that parsing and
 	// formatting are separate, testable steps.
 	dec.UseNumber()

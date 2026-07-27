@@ -116,6 +116,40 @@ reach the model before any call is refused. Pinning catches the change and stops
 the effect; it does not stop the text from being read. Controlling effects is
 stage 3's job.
 
+### Guarding the config itself
+
+The proxy is a line in the config it would be guarding. Anyone who can rewrite
+that file removes the proxy from the chain first, and everything downstream
+becomes theatre. So this part lives outside the traffic path:
+
+```bash
+mcp-guard verify --write
+```
+
+records the MCP server declarations found in the known client configs.
+
+```bash
+mcp-guard verify
+```
+
+checks them and exits non-zero if anything changed.
+
+```bash
+mcp-guard watch
+```
+
+does the same continuously, reporting as it happens.
+
+Only the server declarations are recorded, never whole files. Clients keep
+caches, feature flags and window positions in the same files and rewrite them
+constantly; a whole-file hash would fire every few minutes and be ignored within
+a day. Environment variable and header *names* are covered — a credential
+reaching a server it did not use to reach is exactly the thing to catch — and
+their values never are, because this file belongs in a repository.
+
+Keep the baseline in a repository rather than beside the configs it guards: one
+stored next to what it protects is editable by whoever edits that.
+
 ### Reading a session back
 
 ```bash
@@ -178,7 +212,7 @@ the client's server down with it.
 |---|---|---|
 | 0 | Transparent pipe + session log | **done** |
 | 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | **done** |
-| 2 | Tool pinning: `approve` → `mcp-guard.lock`, canonicalised schema hashes | **done** |
+| 2 | Tool pinning, plus `verify`/`watch` over client configs | **done** |
 | 3 | Effect policy + taint propagation ← the actual product | |
 | 4 | Content normalisation, advisory signals, an `eval` metrics harness | |
 

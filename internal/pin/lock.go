@@ -159,7 +159,7 @@ func Load(path string) (*Lock, error) {
 		return nil, err
 	}
 	var l Lock
-	if err := json.Unmarshal(data, &l); err != nil {
+	if err := json.Unmarshal(canon.TrimBOM(data), &l); err != nil {
 		return nil, fmt.Errorf("pin: %s: %w", path, err)
 	}
 	if l.Version != Version {

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/pterbsgame-netizen/mcp-guard/internal/cfg"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/probe"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
@@ -28,7 +29,10 @@ const usage = `mcp-guard - a recording pass-through for MCP stdio servers.
 
 usage:
   mcp-guard [flags] -- <server-command> [server-args...]
+  mcp-guard approve [flags] -- <server-command> [server-args...]
   mcp-guard replay [session.jsonl | log-dir]
+  mcp-guard verify [--write] [config-file...]
+  mcp-guard watch [config-file...]
 
 examples:
   mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
@@ -44,9 +48,151 @@ func main() {
 			os.Exit(runReplay(os.Args[2:]))
 		case "approve":
 			os.Exit(runApprove(os.Args[2:]))
+		case "verify":
+			os.Exit(runVerify(os.Args[2:]))
+		case "watch":
+			os.Exit(runWatch(os.Args[2:]))
 		}
 	}
 	os.Exit(runProxy())
+}
+
+const configUsage = `mcp-guard %s - guard the client configs that decide which MCP servers run.
+
+usage:
+  mcp-guard verify [flags] [config-file...]
+  mcp-guard watch  [flags] [config-file...]
+
+With no files given, the known client configs on this machine are used.
+
+Record the current state first, then check against it:
+
+  mcp-guard verify --write
+  mcp-guard verify
+  mcp-guard watch
+
+Only the MCP server declarations are recorded, never whole files: clients keep
+caches and window positions in the same files and rewrite them constantly.
+Environment variable and header names are covered, their values never are - the
+baseline belongs in a repository.
+
+flags:
+`
+
+// configFlags is shared by verify and watch.
+func configFlags(name string) (*flag.FlagSet, *string) {
+	fset := flag.NewFlagSet(name, flag.ContinueOnError)
+	baseline := fset.String("baseline", cfg.DefaultBaselineName,
+		"approved config state; keep it in a repository, not beside the configs it guards")
+	fset.Usage = func() {
+		fmt.Fprintf(os.Stderr, configUsage, name)
+		fset.PrintDefaults()
+	}
+	return fset, baseline
+}
+
+func runVerify(args []string) int {
+	fset, baselinePath := configFlags("verify")
+	write := fset.Bool("write", false, "record the current state as approved instead of checking against it")
+	if err := fset.Parse(args); err != nil {
+		return 2
+	}
+
+	paths := fset.Args()
+	if len(paths) == 0 {
+		paths = cfg.Discover()
+	}
+	if len(paths) == 0 {
+		fmt.Fprintln(os.Stderr, "mcp-guard: no client configs found; name them explicitly")
+		return 1
+	}
+
+	current, err := cfg.Snapshot(paths)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		return 1
+	}
+
+	if *write {
+		if err := current.Save(*baselinePath); err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+		var servers int
+		for _, f := range current.Files {
+			servers += len(f.Servers)
+		}
+		fmt.Fprintf(os.Stderr, "recorded %d server(s) across %d config(s) into %s\n",
+			servers, len(current.Files), *baselinePath)
+		return 0
+	}
+
+	approved, err := cfg.LoadBaseline(*baselinePath)
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "mcp-guard: no baseline at %s. Record one with:\n  mcp-guard verify --write\n", *baselinePath)
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		return 1
+	}
+
+	changes := cfg.Diff(approved, current)
+	cfg.Report(os.Stdout, changes)
+	if len(changes) > 0 {
+		return 1
+	}
+	return 0
+}
+
+func runWatch(args []string) int {
+	fset, baselinePath := configFlags("watch")
+	if err := fset.Parse(args); err != nil {
+		return 2
+	}
+
+	approved, err := cfg.LoadBaseline(*baselinePath)
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(os.Stderr, "mcp-guard: no baseline at %s. Record one with:\n  mcp-guard verify --write\n", *baselinePath)
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		return 1
+	}
+
+	paths := fset.Args()
+	if len(paths) == 0 {
+		// Watch what was approved, plus anything that exists now: a config
+		// that appeared since approval is itself worth reporting.
+		paths = union(approved.Paths(), cfg.Discover())
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	fmt.Fprintf(os.Stderr, "watching %d config(s) against %s; Ctrl+C to stop\n", len(paths), *baselinePath)
+	err = cfg.Watch(ctx, approved, paths, func(changes []cfg.Change) {
+		fmt.Fprintf(os.Stdout, "\n%s\n", time.Now().Format(time.RFC3339))
+		cfg.Report(os.Stdout, changes)
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func union(a, b []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range append(append([]string{}, a...), b...) {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 const approveUsage = `mcp-guard approve - record what a server advertises, so a later change is visible.
