@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -55,7 +56,14 @@ func runReplay(args []string) int {
 	if flushErr := out.Flush(); err == nil {
 		err = flushErr
 	}
-	if err != nil {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		// The common first run: nothing has been recorded yet. The raw
+		// GetFileAttributesEx error tells the user nothing useful.
+		fmt.Fprintf(os.Stderr, "mcp-guard: no sessions recorded at %s yet.\n", path)
+		fmt.Fprintln(os.Stderr, "  Wire mcp-guard into your MCP client and use it once, then try again.")
+		return 1
+	case err != nil:
 		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
 		return 1
 	}

@@ -48,10 +48,16 @@ go test ./...
 
 The race detector is worth running — the proxy has three goroutines and one of
 them deliberately outlives `Run`. On Windows `-race` needs cgo and a C compiler,
-which is not on `PATH` by default after an MSYS2 install:
+which an MSYS2 install does not put on `PATH`. In PowerShell:
 
-```bash
-PATH="/c/msys64/ucrt64/bin:$PATH" CGO_ENABLED=1 go test -race ./...
+```powershell
+$env:Path = "C:\msys64\ucrt64\bin;$env:Path"; $env:CGO_ENABLED = "1"; go test -race ./...
+```
+
+The equivalent on Linux or macOS, where the toolchain is already there:
+
+```sh
+go test -race ./...
 ```
 
 ## Use
