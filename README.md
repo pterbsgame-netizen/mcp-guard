@@ -82,6 +82,40 @@ prune. It adds up faster than it looks: one `tools/list` response from a real
 server runs to ~15 KB, and the client repeats the handshake on every restart, so
 the corpus grows even on days when no tool is ever called.
 
+### Pinning what a server advertises
+
+```bash
+mcp-guard approve -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
+```
+
+This starts the server, asks what tools it has, and writes `mcp-guard.lock`
+recording each tool's name, description and input schema. Commit that file: a
+tool that later rewrites its description or widens its schema then shows up in a
+diff during review, which is where it should be caught.
+
+```bash
+mcp-guard approve --diff -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
+```
+
+reports what changed and exits non-zero if anything did, so it can gate a build.
+
+To have the proxy check as it runs, point it at the lock:
+
+```bash
+mcp-guard --lock mcp-guard.lock -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
+```
+
+By default a mismatch is recorded and the call goes through. `--enforce` refuses
+calls to tools that changed, answering the client with the reason instead of the
+result. Run in the default mode for a week first: a tool that breaks a workflow
+the day it is installed is uninstalled the day it is installed.
+
+**What pinning does not do.** `tools/list` is never blocked — refusing it leaves
+the client with no tools and a broken server — so a rewritten description does
+reach the model before any call is refused. Pinning catches the change and stops
+the effect; it does not stop the text from being read. Controlling effects is
+stage 3's job.
+
 ### Reading a session back
 
 ```bash
@@ -144,7 +178,7 @@ the client's server down with it.
 |---|---|---|
 | 0 | Transparent pipe + session log | **done** |
 | 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | **done** |
-| 2 | Tool pinning: `approve` → `mcp-guard.lock`, canonicalised schema hashes | |
+| 2 | Tool pinning: `approve` → `mcp-guard.lock`, canonicalised schema hashes | **done** |
 | 3 | Effect policy + taint propagation ← the actual product | |
 | 4 | Content normalisation, advisory signals, an `eval` metrics harness | |
 

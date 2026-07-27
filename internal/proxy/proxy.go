@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
 )
 
 // Direction labels recorded in the session log.
@@ -53,6 +54,14 @@ type Options struct {
 	// written off. SweepEvery is how often that check runs.
 	CallTTL    time.Duration
 	SweepEvery time.Duration
+
+	// Lock, when set, is the approved state to check the server against.
+	Lock *pin.Lock
+
+	// Enforce turns a mismatch into a refused call. The default is to record
+	// it and let it through: a tool that breaks someone's workflow the day it
+	// is installed gets uninstalled the day it is installed.
+	Enforce bool
 
 	// Stdin/Stdout/Stderr default to the process's own. Overridden in tests.
 	Stdin  io.Reader
@@ -122,13 +131,17 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	}
 	o.Log.Event("start", map[string]any{"argv": o.Argv, "pid": cmd.Process.Pid})
 
-	observe := o.observer(session, corr)
+	pins := &pinState{}
+	observe := o.observer(session, corr, pins)
+	// Everything the client receives goes through one writer, from either
+	// goroutine, so messages cannot interleave.
+	toClient := &syncWriter{w: o.Stdout}
 
 	// server -> client
 	s2cDone := make(chan struct{})
 	go func() {
 		defer close(s2cDone)
-		o.pump(mcp.ServerToClient, serverOut, o.Stdout, observe)
+		o.pump(mcp.ServerToClient, serverOut, toClient, nil, nil, observe)
 	}()
 
 	// client -> server.
@@ -138,7 +151,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	// shutdown forever whenever the server dies first. We let it outlive Run
 	// and die with the process.
 	go func() {
-		o.pump(mcp.ClientToServer, o.Stdin, serverIn, observe)
+		o.pump(mcp.ClientToServer, o.Stdin, serverIn, o.deny(pins), toClient, observe)
 		// The client closed its end: propagate the EOF so a well-behaved
 		// server can shut itself down instead of being killed.
 		_ = serverIn.Close()
@@ -205,7 +218,7 @@ func (o *Options) startSweeper(corr *mcp.Correlator) chan struct{} {
 // Everything it notices is recorded as an event, never acted on. Anomalies are
 // worth seeing — an orphaned response or a reused id says something is wrong —
 // but stage 1 does not get to have an opinion about traffic.
-func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator) func(mcp.Direction, []byte) {
+func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator, pins *pinState) func(mcp.Direction, []byte) {
 	return func(dir mcp.Direction, frame []byte) {
 		msgs, _, err := mcp.ParseFrame(frame)
 		if err != nil {
@@ -239,6 +252,11 @@ func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator) func(mcp.
 					continue
 				}
 				session.Observe(dir, m, &p)
+				if p.Method == "tools/list" {
+					// The advertised set just changed or was stated for the
+					// first time; this is the only moment we can check it.
+					o.verify(session, pins)
+				}
 
 			default:
 				session.Observe(dir, m, nil)
@@ -286,21 +304,44 @@ func exitCode(err error) (int, error) {
 // pump copies newline-delimited JSON-RPC messages from src to dst, logging each
 // one and handing it to observe. The bytes themselves are never modified, and
 // observation never gates the copy: relaying comes first.
-func (o *Options) pump(dir mcp.Direction, src io.Reader, dst io.Writer, observe func(mcp.Direction, []byte)) {
+// deny, when set, inspects each frame before it is forwarded and may return a
+// reply to send back to the sender instead; back is where that reply goes.
+func (o *Options) pump(dir mcp.Direction, src io.Reader, dst io.Writer, deny func([]byte) []byte, back io.Writer, observe func(mcp.Direction, []byte)) {
 	r := bufio.NewReaderSize(src, readBufSize)
 	for {
 		// NOT bufio.Scanner: its 64 KiB default silently truncates large tool
 		// results, and the symptom looks like "the server died for no reason".
 		line, err := r.ReadBytes('\n')
 		if len(line) > 0 {
-			if _, werr := dst.Write(line); werr != nil {
-				return
-			}
-			// No flush on purpose. dst is an *os.File (or a pipe to one), so
-			// every Write is already a syscall. Wrapping it in a bufio.Writer
-			// here is exactly how you get "the client hangs for 30 seconds".
 			o.Log.Record(string(dir), line)
-			observe(dir, line)
+
+			refused := false
+			if deny != nil {
+				if reply := deny(line); reply != nil {
+					// Refused: the server never sees this, and the sender gets
+					// an answer rather than silence.
+					if _, werr := back.Write(reply); werr != nil {
+						return
+					}
+					refused = true
+				}
+			}
+			if !refused {
+				// Observation runs before the message is forwarded, not after.
+				// Verification has to finish before the peer can act on what it
+				// is about to learn: a client that pipelines a tools/call right
+				// behind tools/list would otherwise outrun the check meant to
+				// refuse it. Parsing costs microseconds; the race costs the
+				// whole guarantee.
+				observe(dir, line)
+
+				if _, werr := dst.Write(line); werr != nil {
+					return
+				}
+				// No flush on purpose. dst is an *os.File (or a pipe to one),
+				// so every Write is already a syscall. Wrapping it in a
+				// bufio.Writer is how you get "the client hangs for 30s".
+			}
 		}
 		if err != nil {
 			return
