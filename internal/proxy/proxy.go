@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/pterbsgame-netizen/mcp-guard/internal/detect"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
@@ -61,6 +62,11 @@ type Options struct {
 
 	// Policy, when set, decides what tool calls are allowed to do.
 	Policy *policy.Policy
+
+	// Detect, when set, scores tool results for instruction-shaped content.
+	// It never blocks: a high score only raises the taint level, which makes
+	// the policy stricter about effects.
+	Detect *detect.Ruleset
 
 	// Enforce turns a mismatch into a refused call. The default is to record
 	// it and let it through: a tool that breaks someone's workflow the day it

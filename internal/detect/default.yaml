@@ -1,0 +1,82 @@
+# mcp-guard content signatures.
+#
+# These never block anything. A match raises the score; a score at or above the
+# threshold marks the session as having taken in untrusted content, which makes
+# the effect rules stricter. That is the only thing this file does.
+#
+# Patterns are matched against normalised text, so they can be written plainly:
+# case, zero-width characters, Cyrillic lookalikes, fullwidth forms and bidi
+# overrides have already been folded away, and base64, hex, percent-encoded,
+# HTML-comment and display:none layers have already been unfolded.
+#
+# Weights are small on purpose. Any single phrase can appear in honest text -
+# this file contains most of them - so nothing here should reach the threshold
+# on its own except the patterns that are hard to write by accident.
+
+version: 1
+
+# Two ordinary signals, or one strong one, marks the session.
+threshold: 4
+
+# Added to a rule's weight when it matches in a layer that was not visible:
+# inside base64, an HTML comment, a span with display:none. Prose does not
+# accidentally hide itself.
+hidden_bonus: 3
+
+rules:
+  - id: instruction-override
+    description: Telling the model to disregard what it was told before.
+    weight: 3
+    pattern: '\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+)?(?:the\s+)?(?:previous|prior|earlier|above|preceding|system)\s+(?:instructions?|prompts?|rules?|messages?|context)\b'
+
+  - id: role-override
+    description: Trying to replace the system prompt or the model's role.
+    weight: 3
+    pattern: '\b(?:you\s+are\s+now|from\s+now\s+on\s+you|new\s+(?:system\s+)?(?:prompt|instructions?)|<\|?(?:im_start|system)\|?>|\[\s*system\s*\]|###\s*system)\b'
+
+  - id: secrecy
+    description: Asking that the action be kept from the user.
+    weight: 3
+    pattern: '\b(?:do\s+not|don''t|never)\s+(?:tell|inform|mention\s+(?:this\s+)?to|reveal\s+(?:this\s+)?to|show\s+this\s+to)\s+(?:the\s+)?(?:user|human|operator)\b'
+
+  - id: silent-action
+    description: Asking for an action to be taken without reporting it.
+    weight: 2
+    pattern: '\b(?:without\s+(?:telling|informing|asking|notifying|mentioning)|silently|quietly)\s+(?:the\s+)?(?:user|human|anyone|it)\b'
+
+  - id: credential-exfiltration
+    description: Naming a credential file together with sending it somewhere.
+    weight: 3
+    pattern: '\b(?:id_rsa|id_ed25519|\.env\b|credentials|\.aws/|\.ssh/|api[_\s-]?key|access[_\s-]?token|secret[_\s-]?key)\b[\s\S]{0,120}\b(?:send|post|upload|exfiltrate|transmit|curl|fetch|webhook|https?://)'
+
+  - id: exfiltration-target
+    description: Sending content to a URL, phrased as an instruction.
+    weight: 2
+    pattern: '\b(?:send|post|upload|forward|transmit)\s+(?:the\s+)?(?:contents?|results?|files?|output|data|it)\s+(?:of\s+\S+\s+)?to\s+https?://'
+
+  - id: pipe-to-shell
+    description: Fetching a script and running it in one step.
+    weight: 3
+    pattern: '(?:curl|wget|irm|invoke-webrequest)\b[^\n|]{0,200}\|\s*(?:ba|z|)sh\b|\biex\s*\(\s*(?:irm|iwr|new-object)'
+
+  - id: agent-config-write
+    description: Instructing the agent to edit the files that configure it.
+    weight: 3
+    pattern: '\b(?:write|edit|modify|append|add)\b[\s\S]{0,80}\b(?:mcp\.json|claude_desktop_config\.json|\.cursor/|\.claude/|mcp-guard\.(?:lock|policy\.yaml))'
+
+  - id: tool-directive
+    description: Text steering the agent towards a specific tool call.
+    weight: 2
+    pattern: '\b(?:call|invoke|use|run)\s+the\s+\S{1,40}\s+tool\b|\bbefore\s+(?:answering|responding|continuing|doing\s+anything|using\s+this)\b[\s\S]{0,80}\b(?:read|open|fetch|run|execute)\b'
+
+  - id: read-then-pass
+    description: Reading a sensitive file and feeding it into a later tool call.
+    weight: 3
+    # "read" is not \b-bounded on the right: the tool is usually named
+    # read_file, and \bread\b would stop at the underscore.
+    pattern: '\b(?:read|open|cat|load|get)\w*[\s\S]{0,80}(?:id_rsa|id_ed25519|\.env\b|credentials|\.aws|\.ssh|secret|api[_\s-]?key|token)[\s\S]{0,120}\b(?:include|put|place|pass|add|insert|embed|append)\b[\s\S]{0,60}\b(?:argument|parameter|field|next\s+(?:tool\s+)?call|notes|payload|request)\b'
+
+  - id: encoded-instruction-marker
+    description: A phrase whose only purpose is to introduce a payload.
+    weight: 2
+    pattern: '\b(?:decode\s+(?:the\s+)?(?:following|this|base64)|base64\s*(?:decode|:)|rot13)\b'

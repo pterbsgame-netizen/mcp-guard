@@ -161,6 +161,47 @@ verdicts instead of recording them.
 cannot be assumed yet, so there is no way to ask from inside a stdio proxy.
 Refusing and saying so beats pretending to have asked.
 
+### Content signals, which never block
+
+With a policy in place, tool results are scanned for instruction-shaped content.
+A match does **not** block anything and cannot: it raises the session's taint
+level, which makes the effect rules stricter. That is the whole contract.
+
+The reason is not modesty about regular expressions. The rules are in a public
+repository, so getting around them takes an attacker about thirty seconds, while
+the false positives land on the user every day — a blog post about prompt
+injection, a code review of a file containing the phrase. As a defence the value
+is near zero; as telemetry, and as a reason to be stricter about effects
+afterwards, it is real. It is kept in exactly that role.
+
+Before matching, text is unfolded so a signature written in plain English still
+finds a disguised instruction: base64, hex, percent-encoding, HTML comments and
+`display:none` blocks are decoded, and zero-width characters, Cyrillic
+lookalikes, fullwidth forms and bidirectional overrides are folded away. An
+instruction found only after decoding scores higher than one in plain view,
+because prose does not accidentally hide itself.
+
+Signatures are deliberately weak: no single phrase reaches the threshold alone,
+because install docs pipe scripts into shells and this project's own README
+talks about refusing writes to `mcp.json`. Missing a taint is not missing an
+attack — the effect rules refuse the write to `mcp.json` on their own, whatever
+the surrounding text says.
+
+### Measuring it
+
+```bash
+mcp-guard eval --attack corpus/attack --benign ~/.mcp-guard/sessions
+```
+
+Recall on the attack corpus is the easy number and is currently 100% over six
+published shapes — but every rule was written after reading them, so it proves
+the rules match their own examples, not that they generalise. The number that
+decides whether the tool survives is the false-positive rate on real traffic,
+which cannot be manufactured. The benign side reports how much evidence it
+actually had, so a rate measured over four calls is not mistaken for a rate, and
+the headline "blocks per week" refuses to compute from less than an hour of
+elapsed time.
+
 ### Guarding the config itself
 
 The proxy is a line in the config it would be guarding. Anyone who can rewrite
@@ -268,7 +309,7 @@ the client's server down with it.
 | 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | **done** |
 | 2 | Tool pinning, plus `verify`/`watch` over client configs | **done** |
 | 3 | Effect policy + taint propagation ← the actual product | **done** |
-| 4 | Content normalisation, advisory signals, an `eval` metrics harness | |
+| 4 | Content normalisation, advisory signals, an `eval` metrics harness | **done** |
 
 Default mode on install is **observe**, never enforce. A tool that breaks
 someone's workflow on day one gets uninstalled on day one.

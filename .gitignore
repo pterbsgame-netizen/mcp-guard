@@ -2,7 +2,11 @@
 # every tool result: file contents, API responses, tokens the agent happened to
 # read. Treat them like a password file. Never commit them.
 *.jsonl
-/corpus/
+
+# The benign corpus is real recorded traffic and stays out of the repository.
+# The attack corpus is synthetic fixture data and is committed, so it is not
+# ignored here.
+/corpus/benign/
 
 # Build output. Anchored with a leading slash: an unanchored "mcp-guard" also
 # matches the cmd/mcp-guard/ directory and silently drops the entry point.

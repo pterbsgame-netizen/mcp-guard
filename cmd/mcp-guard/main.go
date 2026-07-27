@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/cfg"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/detect"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/eval"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/probe"
@@ -53,9 +55,82 @@ func main() {
 			os.Exit(runVerify(os.Args[2:]))
 		case "watch":
 			os.Exit(runWatch(os.Args[2:]))
+		case "eval":
+			os.Exit(runEval(os.Args[2:]))
 		}
 	}
 	os.Exit(runProxy())
+}
+
+const evalUsage = `mcp-guard eval - measure the rules against corpora.
+
+usage:
+  mcp-guard eval [--attack dir] [--benign log-or-dir] [--policy p] [--rules r]
+
+  mcp-guard eval --attack corpus/attack --benign ~/.mcp-guard/sessions
+
+Recall on the attack corpus is easy to move and easy to fool yourself with. The
+number that decides whether the tool survives is the false positive rate on real
+traffic, and it cannot be invented - it has to come from sessions you actually
+had. The benign side reports how much evidence it had, so a rate measured over
+four calls is not mistaken for a rate.
+
+flags:
+`
+
+func runEval(args []string) int {
+	fset := flag.NewFlagSet("eval", flag.ContinueOnError)
+	attackDir := fset.String("attack", "", "directory of attack payloads, one per file")
+	benignPath := fset.String("benign", "", "recorded session log or directory of them")
+	policyPath := fset.String("policy", "default", `policy for the benign side; "default" or a path`)
+	rulesPath := fset.String("rules", "default", `signatures; "default" or a path`)
+	fset.Usage = func() { fmt.Fprint(os.Stderr, evalUsage); fset.PrintDefaults() }
+	if err := fset.Parse(args); err != nil {
+		return 2
+	}
+	if *attackDir == "" && *benignPath == "" {
+		fset.Usage()
+		return 2
+	}
+
+	rules := detect.Default()
+	if *rulesPath != "default" {
+		var err error
+		if rules, err = detect.Load(*rulesPath); err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+	}
+	rulesForPolicy := policy.Default()
+	if *policyPath != "default" {
+		var err error
+		if rulesForPolicy, err = policy.Load(*policyPath); err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+	}
+
+	var attack *eval.AttackReport
+	if *attackDir != "" {
+		a, err := eval.Attack(*attackDir, rules)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+		attack = &a
+	}
+	var benign *eval.BenignReport
+	if *benignPath != "" {
+		b, err := eval.Benign(*benignPath, rules, rulesForPolicy)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+		benign = &b
+	}
+
+	eval.Report(os.Stdout, attack, benign)
+	return 0
 }
 
 const configUsage = `mcp-guard %s - guard the client configs that decide which MCP servers run.
@@ -334,6 +409,7 @@ func runProxy() int {
 	lockPath := flag.String("lock", "", "check the server against this lock file (see: mcp-guard approve)")
 	enforce := flag.Bool("enforce", false, "act on verdicts instead of only recording them")
 	policyPath := flag.String("policy", "", `policy file; "default" uses the built-in one`)
+	rulesPath := flag.String("rules", "", "content signature file; defaults to the built-in set when a policy is in use")
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 		flag.PrintDefaults()
@@ -355,7 +431,7 @@ func runProxy() int {
 	log, err := open()
 	switch {
 	case errors.Is(err, proxy.ErrNotSecured):
-		// Worth saying out loud вЂ” the log holds every tool result verbatim вЂ”
+		// Worth saying out loud Р Р†Р вЂљРІР‚Сњ the log holds every tool result verbatim Р Р†Р вЂљРІР‚Сњ
 		// but not worth refusing to start and breaking the client's server.
 		fmt.Fprintf(os.Stderr, "mcp-guard: warning: %v\n", err)
 	case err != nil:
@@ -393,6 +469,20 @@ func runProxy() int {
 		}
 	}
 
+	// Signatures are only useful alongside a policy: all they do is raise the
+	// taint level, and taint is something only the policy acts on.
+	var signatures *detect.Ruleset
+	switch {
+	case *rulesPath != "":
+		signatures, err = detect.Load(*rulesPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+	case rules != nil:
+		signatures = detect.Default()
+	}
+
 	res, runErr := proxy.Run(ctx, proxy.Options{
 		Argv:    argv,
 		Log:     log,
@@ -400,6 +490,7 @@ func runProxy() int {
 		CallTTL: *callTTL,
 		Lock:    lock,
 		Policy:  rules,
+		Detect:  signatures,
 		Enforce: *enforce,
 	})
 	if runErr != nil {

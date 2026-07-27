@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/normalize"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
 )
@@ -118,20 +119,99 @@ func (g *guard) answered(dir mcp.Direction, m mcp.Message) {
 	tool, ok := g.pendingTools[key]
 	delete(g.pendingTools, key)
 	alreadyTainted := g.tainted
-	if ok && !alreadyTainted && g.o.Policy.IsTaintSource(tool) {
+	bySource := ok && g.o.Policy.IsTaintSource(tool)
+	if bySource {
 		g.tainted = true
 	}
-	nowTainted := g.tainted
 	g.mu.Unlock()
 
-	if ok && !alreadyTainted && nowTainted {
+	if !ok {
+		return
+	}
+	if bySource && !alreadyTainted {
 		g.o.Log.Event("tainted", map[string]any{
-			"by": tool,
+			"by":     tool,
+			"reason": "source",
 			"why": "a result from this tool is content from a source nobody vouches for; " +
 				"sensitive effects are tightened from here on",
 		})
 	}
+
+	// The content signal is the weaker one and comes second on purpose. It
+	// never blocks and never can: all it may do is reach the same conclusion
+	// the source rule would have reached, for a tool nobody thought to list.
+	if g.o.Detect == nil {
+		return
+	}
+	text := resultText(m.Result)
+	if text == "" {
+		return
+	}
+	res := g.o.Detect.Scan(text)
+	if len(res.Hits) == 0 {
+		return
+	}
+	tainting := g.o.Detect.Tainting(res)
+	g.o.Log.Event("content-score", map[string]any{
+		"tool":     tool,
+		"score":    res.Score,
+		"hits":     res.Hits,
+		"tainting": tainting,
+	})
+	if !tainting || alreadyTainted || bySource {
+		return
+	}
+	g.mu.Lock()
+	g.tainted = true
+	g.mu.Unlock()
+	g.o.Log.Event("tainted", map[string]any{
+		"by":     tool,
+		"reason": "content",
+		"score":  res.Score,
+		"why": "this result reads like instructions aimed at the agent; " +
+			"nothing is blocked for that, but sensitive effects are tightened from here on",
+	})
 }
+
+// resultText pulls the human-readable strings out of a tool result.
+//
+// Bounded twice over: the walk stops early, and the detector truncates again.
+// A result can be megabytes, and an instruction meant for a model has to be
+// short enough for the model to act on.
+func resultText(result json.RawMessage) string {
+	if len(result) == 0 || len(result) > 4<<20 {
+		return ""
+	}
+	var v any
+	if json.Unmarshal(result, &v) != nil {
+		return ""
+	}
+	var b strings.Builder
+	collectText(v, 0, &b)
+	return b.String()
+}
+
+func collectText(v any, depth int, b *strings.Builder) {
+	if depth > 8 || b.Len() > normalizeBudget {
+		return
+	}
+	switch t := v.(type) {
+	case string:
+		b.WriteString(t)
+		b.WriteByte('\n')
+	case []any:
+		for _, e := range t {
+			collectText(e, depth+1, b)
+		}
+	case map[string]any:
+		for _, e := range t {
+			collectText(e, depth+1, b)
+		}
+	}
+}
+
+// normalizeBudget matches what the normaliser will look at anyway.
+const normalizeBudget = normalize.MaxInput
 
 // gate decides whether a client-to-server frame should be refused, returning
 // the reply to send back instead, or nil to let it through.
