@@ -1,0 +1,111 @@
+# mcp-guard default policy.
+#
+# Decisions are about effects, never about wording. A rule here says "this file
+# is not to be touched", not "this text looks suspicious".
+#
+# Pattern forms, and there are only these three:
+#   ~/.ssh/**          everything at or below a directory
+#   ~/.bashrc          exactly one file
+#   **/.env            a file with this name, anywhere
+#
+# Paths are resolved before matching: ~, environment variables, .. segments,
+# symlinks, letter case, Windows short names and NTFS streams are all reduced
+# to one form first, so there is no spelling that walks past a rule.
+
+version: 1
+
+# observe records what would have happened and changes nothing. Live with it
+# for a week, read what it caught, then switch to enforce.
+mode: observe
+
+paths:
+  # Credentials and anything that gets executed on someone else's behalf.
+  deny:
+    - "~/.ssh/**"
+    - "~/.aws/**"
+    - "~/.gnupg/**"
+    - "~/.kube/**"
+    - "~/.docker/config.json"
+    - "**/.git/hooks/**"
+    - "**/.env"
+    - "**/.npmrc"
+    - "**/.pypirc"
+    - "**/.netrc"
+
+    # The agent's own configuration. This is the CurXecute shape: talk the
+    # agent into editing the file that decides which servers it runs, and the
+    # next session belongs to whoever wrote it.
+    - "**/mcp.json"
+    - "**/.cursor/**"
+    - "**/.claude/**"
+    - "**/claude_desktop_config.json"
+    - "**/mcp-guard.lock"
+    - "**/mcp-guard.policy.yaml"
+    - "**/mcp-guard.configs.lock"
+
+    # Shell startup files: a write here runs next time a terminal opens.
+    - "~/.bashrc"
+    - "~/.bash_profile"
+    - "~/.zshrc"
+    - "~/.profile"
+    - "~/.config/fish/**"
+
+    # Autostart, on each platform.
+    - "~/.config/systemd/user/**"
+    - "~/.config/autostart/**"
+    - "~/Library/LaunchAgents/**"
+    - "~/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/Startup/**"
+    - "**/Microsoft/Windows/PowerShell/profile.ps1"
+
+  # Worth a second look every time.
+  confirm:
+    - "**/.git/config"
+    - "**/.vscode/tasks.json"
+    - "**/.vscode/launch.json"
+    - "**/package.json"
+    - "**/pyproject.toml"
+
+  # Ordinary during honest work; worth asking about once the session has taken
+  # in content from somewhere nobody vouches for.
+  confirm_if_tainted:
+    - "~/.gitconfig"
+    - "**/Makefile"
+    - "**/*.sh"
+    - "**/*.ps1"
+    - "**/*.bat"
+    - "**/*.cmd"
+    - "**/.github/workflows/**"
+
+exec:
+  # Tools that run commands are their own class: their arguments are a language,
+  # not a path, so nothing useful can be said about where one ends up writing.
+  tools:
+    - "*exec*"
+    - "*shell*"
+    - "*command*"
+    - "*terminal*"
+    - "bash"
+    - "sh"
+    - "powershell"
+    - "run"
+    - "run_*"
+  action: confirm
+  action_if_tainted: deny
+
+taint:
+  # Tools whose results are content from somewhere nobody vouches for. A result
+  # from one of these does not block anything by itself; it tightens what the
+  # rules above already say.
+  sources:
+    - "*fetch*"
+    - "*http*"
+    - "*browse*"
+    - "*search*"
+    - "*web*"
+    - "*mail*"
+    - "*issue*"
+    - "*slack*"
+    - "*jira*"
+    - "*linear*"
+    - "*notion*"
+    - "*read_media_file*"

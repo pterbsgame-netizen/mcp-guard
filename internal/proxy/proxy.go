@@ -19,6 +19,7 @@ import (
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
 )
 
 // Direction labels recorded in the session log.
@@ -57,6 +58,9 @@ type Options struct {
 
 	// Lock, when set, is the approved state to check the server against.
 	Lock *pin.Lock
+
+	// Policy, when set, decides what tool calls are allowed to do.
+	Policy *policy.Policy
 
 	// Enforce turns a mismatch into a refused call. The default is to record
 	// it and let it through: a tool that breaks someone's workflow the day it
@@ -131,8 +135,8 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	}
 	o.Log.Event("start", map[string]any{"argv": o.Argv, "pid": cmd.Process.Pid})
 
-	pins := &pinState{}
-	observe := o.observer(session, corr, pins)
+	g := newGuard(&o)
+	observe := o.observer(session, corr, g)
 	// Everything the client receives goes through one writer, from either
 	// goroutine, so messages cannot interleave.
 	toClient := &syncWriter{w: o.Stdout}
@@ -151,7 +155,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	// shutdown forever whenever the server dies first. We let it outlive Run
 	// and die with the process.
 	go func() {
-		o.pump(mcp.ClientToServer, o.Stdin, serverIn, o.deny(pins), toClient, observe)
+		o.pump(mcp.ClientToServer, o.Stdin, serverIn, g.gate, toClient, observe)
 		// The client closed its end: propagate the EOF so a well-behaved
 		// server can shut itself down instead of being killed.
 		_ = serverIn.Close()
@@ -218,7 +222,7 @@ func (o *Options) startSweeper(corr *mcp.Correlator) chan struct{} {
 // Everything it notices is recorded as an event, never acted on. Anomalies are
 // worth seeing — an orphaned response or a reused id says something is wrong —
 // but stage 1 does not get to have an opinion about traffic.
-func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator, pins *pinState) func(mcp.Direction, []byte) {
+func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator, g *guard) func(mcp.Direction, []byte) {
 	return func(dir mcp.Direction, frame []byte) {
 		msgs, _, err := mcp.ParseFrame(frame)
 		if err != nil {
@@ -252,10 +256,11 @@ func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator, pins *pin
 					continue
 				}
 				session.Observe(dir, m, &p)
+				g.answered(dir, m)
 				if p.Method == "tools/list" {
 					// The advertised set just changed or was stated for the
 					// first time; this is the only moment we can check it.
-					o.verify(session, pins)
+					g.verifyTools(session)
 				}
 
 			default:

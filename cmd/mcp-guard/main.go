@@ -20,6 +20,7 @@ import (
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/cfg"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/probe"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/replay"
@@ -331,7 +332,8 @@ func runProxy() int {
 	maxLog := flag.Int64("log-max-bytes", proxy.DefaultMaxLogBytes, "rotate the session log past this size; 0 disables rotation")
 	callTTL := flag.Duration("call-ttl", 5*time.Minute, "how long an unanswered request is remembered before it is written off")
 	lockPath := flag.String("lock", "", "check the server against this lock file (see: mcp-guard approve)")
-	enforce := flag.Bool("enforce", false, "refuse calls to tools that changed since approval, instead of only recording them")
+	enforce := flag.Bool("enforce", false, "act on verdicts instead of only recording them")
+	policyPath := flag.String("policy", "", `policy file; "default" uses the built-in one`)
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 		flag.PrintDefaults()
@@ -353,7 +355,7 @@ func runProxy() int {
 	log, err := open()
 	switch {
 	case errors.Is(err, proxy.ErrNotSecured):
-		// Worth saying out loud — the log holds every tool result verbatim —
+		// Worth saying out loud вЂ” the log holds every tool result verbatim вЂ”
 		// but not worth refusing to start and breaking the client's server.
 		fmt.Fprintf(os.Stderr, "mcp-guard: warning: %v\n", err)
 	case err != nil:
@@ -377,12 +379,27 @@ func runProxy() int {
 		}
 	}
 
+	var rules *policy.Policy
+	switch {
+	case *policyPath == "default":
+		rules = policy.Default()
+	case *policyPath != "":
+		rules, err = policy.Load(*policyPath)
+		if err != nil {
+			// Same reasoning as the lock: the user asked for this server to be
+			// governed, and running it ungoverned is worse than not running it.
+			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			return 1
+		}
+	}
+
 	res, runErr := proxy.Run(ctx, proxy.Options{
 		Argv:    argv,
 		Log:     log,
 		Grace:   *grace,
 		CallTTL: *callTTL,
 		Lock:    lock,
+		Policy:  rules,
 		Enforce: *enforce,
 	})
 	if runErr != nil {

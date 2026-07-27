@@ -15,6 +15,7 @@ import (
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
 )
 
@@ -470,6 +471,169 @@ func TestEnforceBlocksChangedTool(t *testing.T) {
 	}
 }
 
+// driver drives a proxied session over pipes, so the test can wait for each
+// answer before sending the next request.
+type driver struct {
+	t         *testing.T
+	in        *io.PipeWriter
+	rd        *bufio.Reader
+	serverErr *bytes.Buffer
+	done      chan struct{}
+}
+
+func drive(t *testing.T, opts proxy.Options) *driver {
+	t.Helper()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	serverErr := &bytes.Buffer{}
+
+	opts.Argv = []string{self, "-test.run=^TestHelperMCPServer$"}
+	if opts.Env == nil {
+		opts.Env = append(os.Environ(), mcpServerEnv+"=a tool")
+	}
+	opts.Stdin, opts.Stdout, opts.Stderr = inR, outW, serverErr
+	if opts.Grace == 0 {
+		opts.Grace = 5 * time.Second
+	}
+
+	d := &driver{t: t, in: inW, rd: bufio.NewReader(outR), serverErr: serverErr, done: make(chan struct{})}
+	go func() {
+		defer close(d.done)
+		_, _ = proxy.Run(context.Background(), opts)
+		_ = outW.Close()
+	}()
+	return d
+}
+
+func (d *driver) send(frame string) {
+	d.t.Helper()
+	if _, err := d.in.Write([]byte(frame + "\n")); err != nil {
+		d.t.Fatalf("send: %v", err)
+	}
+}
+
+func (d *driver) recv() mcp.Message {
+	d.t.Helper()
+	line, err := d.rd.ReadBytes('\n')
+	if err != nil {
+		d.t.Fatalf("read: %v (server stderr: %s)", err, d.serverErr.String())
+	}
+	msgs, _, err := mcp.ParseFrame(line)
+	if err != nil {
+		d.t.Fatalf("parse %s: %v", line, err)
+	}
+	return msgs[0]
+}
+
+func (d *driver) handshake() {
+	d.t.Helper()
+	d.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	if m := d.recv(); m.Kind != mcp.KindResponse {
+		d.t.Fatalf("initialize answered with %v", m.Kind)
+	}
+	d.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+}
+
+func (d *driver) close() {
+	d.t.Helper()
+	_ = d.in.Close()
+	<-d.done
+}
+
+func jsonPath(p string) string {
+	b, _ := json.Marshal(p)
+	return string(b)
+}
+
+// TestPolicyBlocksTheWrite is the stage-3 acceptance criterion. CurXecute is
+// stopped because a call tried to write to the file that decides which servers
+// run вЂ” not because anything recognised an instruction in the message that
+// produced the call. There is no text to recognise here at all.
+func TestPolicyBlocksTheWrite(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	target := filepath.Join(home, ".cursor", "mcp.json")
+
+	d := drive(t, proxy.Options{Policy: policy.Default(), Enforce: true})
+	d.handshake()
+
+	d.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"write_file",` +
+		`"arguments":{"path":` + jsonPath(target) + `,"content":"{}"}}}`)
+	m := d.recv()
+
+	if m.Kind != mcp.KindError {
+		t.Fatalf("the write was answered with %v, want an error", m.Kind)
+	}
+	if m.ID.String() != "2" {
+		t.Errorf("error id = %s, want 2", m.ID)
+	}
+	if m.Error.Code != mcp.CodeBlocked {
+		t.Errorf("error code = %d, want %d", m.Error.Code, mcp.CodeBlocked)
+	}
+	if !strings.Contains(m.Error.Message, "mcp.json") {
+		t.Errorf("the refusal does not say which file it was about: %q", m.Error.Message)
+	}
+
+	// An ordinary write in the same session must still go through, or the
+	// policy is just an outage.
+	d.send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"write_file",` +
+		`"arguments":{"path":` + jsonPath(filepath.Join(home, "notes.txt")) + `,"content":"hi"}}}`)
+	if m := d.recv(); m.Kind != mcp.KindResponse {
+		t.Errorf("an ordinary write was answered with %v: %+v", m.Kind, m.Error)
+	}
+
+	d.close()
+	if strings.Count(d.serverErr.String(), callMarker) != 1 {
+		t.Errorf("the server should have seen exactly one call, saw:\n%s", d.serverErr.String())
+	}
+}
+
+// TestTaintEscalation: the same call, decided differently because of what the
+// session swallowed beforehand. Nothing about the call itself changed, and no
+// classifier looked at any text.
+func TestTaintEscalation(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	script := jsonPath(filepath.Join(home, "dev", "build.sh"))
+
+	d := drive(t, proxy.Options{Policy: policy.Default(), Enforce: true})
+	d.handshake()
+
+	// Clean session: allowed.
+	d.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"write_file",` +
+		`"arguments":{"path":` + script + `,"content":"echo hi"}}}`)
+	if m := d.recv(); m.Kind != mcp.KindResponse {
+		t.Fatalf("clean session: answered with %v: %+v", m.Kind, m.Error)
+	}
+
+	// Pull in content from somewhere nobody vouches for.
+	d.send(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"fetch_url",` +
+		`"arguments":{"url":"https://example.com/readme"}}}`)
+	if m := d.recv(); m.Kind != mcp.KindResponse {
+		t.Fatalf("fetch: answered with %v", m.Kind)
+	}
+
+	// Same write as before, now held.
+	d.send(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"write_file",` +
+		`"arguments":{"path":` + script + `,"content":"echo hi"}}}`)
+	m := d.recv()
+	if m.Kind != mcp.KindError {
+		t.Fatalf("tainted session: answered with %v, want the write to be held", m.Kind)
+	}
+	if !strings.Contains(m.Error.Message, "untrusted") {
+		t.Errorf("the refusal does not explain what changed: %q", m.Error.Message)
+	}
+	d.close()
+}
+
 // TestObserveModeLetsItThrough is the default, and the reason anyone keeps the
 // tool installed long enough to turn enforcement on.
 func TestObserveModeLetsItThrough(t *testing.T) {
@@ -518,6 +682,73 @@ func TestObserveModeLetsItThrough(t *testing.T) {
 	}
 	if strings.Contains(out.String(), `"code":-32000`) {
 		t.Errorf("observe mode sent a block error to the client:\n%s", out.String())
+	}
+}
+
+// TestCorpusPolicy runs the default policy over every tools/call in a recorded
+// session and fails on anything it would not allow.
+//
+// This is the half of the stage-3 criterion that decides whether the tool
+// survives: catching CurXecute is worth nothing if ordinary work also trips.
+// It is skipped unless MCPGUARD_CORPUS points at a log, and it reports how many
+// calls it actually judged — a corpus with no tool calls in it proves nothing,
+// and saying so is the point.
+func TestCorpusPolicy(t *testing.T) {
+	path := os.Getenv("MCPGUARD_CORPUS")
+	if path == "" {
+		t.Skip("set MCPGUARD_CORPUS to a session log to run this")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+	defer f.Close()
+
+	rules := policy.Default()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64<<10), 64<<20)
+
+	var judged, flagged int
+	for line := 1; sc.Scan(); line++ {
+		var rec struct {
+			Dir string          `json:"dir"`
+			Msg json.RawMessage `json:"msg"`
+		}
+		if json.Unmarshal(sc.Bytes(), &rec) != nil || rec.Dir != proxy.DirClientToServer || len(rec.Msg) == 0 {
+			continue
+		}
+		msgs, _, err := mcp.ParseFrame(rec.Msg)
+		if err != nil {
+			continue
+		}
+		for _, m := range msgs {
+			if m.Kind != mcp.KindRequest || m.Method != "tools/call" {
+				continue
+			}
+			var params struct {
+				Name      string          `json:"name"`
+				Arguments json.RawMessage `json:"arguments"`
+			}
+			if json.Unmarshal(m.Params, &params) != nil {
+				continue
+			}
+			judged++
+			// Judged on a clean session: taint escalation is expected to fire
+			// sometimes and is not a false positive on its own.
+			v := rules.Decide(policy.Call{Tool: params.Name, Args: params.Arguments}, false)
+			if v.Action != policy.Allow {
+				flagged++
+				t.Errorf("%s:%d %s -> %s via %q (paths %v)",
+					filepath.Base(path), line, params.Name, v.Action, v.Rule, v.Paths)
+			}
+		}
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan corpus: %v", err)
+	}
+	t.Logf("judged %d tool call(s), %d flagged", judged, flagged)
+	if judged == 0 {
+		t.Log("no tool calls in this corpus: this run proves nothing about false positives")
 	}
 }
 

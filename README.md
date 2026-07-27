@@ -116,6 +116,51 @@ reach the model before any call is refused. Pinning catches the change and stops
 the effect; it does not stop the text from being read. Controlling effects is
 stage 3's job.
 
+### Controlling what calls are allowed to do
+
+```bash
+mcp-guard --policy default -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
+```
+
+The policy decides on **effects**, never on wording. CurXecute is not stopped by
+noticing an instruction inside a message; it is stopped because a call tried to
+write to the file that decides which servers run. That is a fact about the call,
+it is testable, its false positives are countable, and rephrasing does not get
+around it.
+
+Paths are resolved before they are matched, so there is no spelling that walks
+past a rule: `~`, `%USERPROFILE%`, `$HOME`, `..` segments, symlinks, letter case,
+Windows 8.3 short names, `\\?\` prefixes and NTFS alternate data streams all
+reduce to one form first.
+
+Rules are data, in three pattern forms and no more:
+
+```yaml
+paths:
+  deny:    ["~/.ssh/**", "**/.env", "**/mcp.json"]
+  confirm: ["**/package.json"]
+  confirm_if_tainted: ["**/*.sh"]
+```
+
+`~/.ssh/**` is a subtree, `~/.bashrc` is one file, `**/.env` is that name
+anywhere. Write your own with `--policy path/to/rules.yaml`; the built-in set is
+`internal/policy/default.yaml`.
+
+**Taint.** A result from a tool that brings in content nobody vouches for —
+fetched pages, mail, issues — marks the session. Nothing is blocked for that
+reason alone; it tightens what the rules already say, so a write that is
+ordinary during honest work becomes something to confirm afterwards. The
+decision is about where the content came from, not what it says, which is why
+rewording does not defeat it.
+
+Default is observe. `--enforce`, or `mode: enforce` in the policy, acts on
+verdicts instead of recording them.
+
+**What `confirm` does today.** It refuses, with an explanation. The protocol has
+`elicitation/create` for asking the user, but that needs client support that
+cannot be assumed yet, so there is no way to ask from inside a stdio proxy.
+Refusing and saying so beats pretending to have asked.
+
 ### Guarding the config itself
 
 The proxy is a line in the config it would be guarding. Anyone who can rewrite
@@ -213,11 +258,21 @@ the client's server down with it.
 | 0 | Transparent pipe + session log | **done** |
 | 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | **done** |
 | 2 | Tool pinning, plus `verify`/`watch` over client configs | **done** |
-| 3 | Effect policy + taint propagation ← the actual product | |
+| 3 | Effect policy + taint propagation ← the actual product | **done** |
 | 4 | Content normalisation, advisory signals, an `eval` metrics harness | |
 
-Default mode on install will be **observe**, never enforce. A tool that breaks
+Default mode on install is **observe**, never enforce. A tool that breaks
 someone's workflow on day one gets uninstalled on day one.
+
+### What is not proven yet
+
+The false-positive rate. The attack side is covered by tests — CurXecute is
+refused at the write, a silently swapped tool description is caught, a rewritten
+config is reported — but "ordinary work never trips" is only as good as the
+corpus it was measured on, and the corpus here contains no tool calls yet.
+`MCPGUARD_CORPUS=<log> go test ./internal/proxy/` runs the policy over a
+recorded session and says how many calls it actually judged. Until that number
+is large, treat enforce mode as untested on real traffic.
 
 ## Notes on Windows
 
