@@ -1,12 +1,10 @@
-// Package proxy implements the stage-0 transparent MCP stdio proxy.
+// Package proxy implements the MCP stdio proxy: it starts the real MCP server
+// as a child process and relays newline-delimited JSON-RPC between the client
+// and the server without touching a single byte, recording the session and
+// tracking protocol state as it goes.
 //
-// It starts the real MCP server as a child process and relays newline-delimited
-// JSON-RPC between the client and the server without touching a single byte,
-// recording the full session to a JSONL log along the way.
-//
-// Stage 0 contains no security logic on purpose. Nothing is inspected, nothing
-// is blocked, nothing is rewritten. The only job here is to be an invisible
-// piece of pipe and to start collecting the benign corpus.
+// Through stage 1 it still blocks nothing. Parsing happens beside the traffic,
+// never in its way: a frame the parser cannot understand is relayed anyway.
 package proxy
 
 import (
@@ -18,12 +16,14 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
 )
 
 // Direction labels recorded in the session log.
 const (
-	DirClientToServer = "c2s"
-	DirServerToClient = "s2c"
+	DirClientToServer = string(mcp.ClientToServer)
+	DirServerToClient = string(mcp.ServerToClient)
 )
 
 // readBufSize is the initial per-direction read buffer. Messages larger than
@@ -39,7 +39,7 @@ type Options struct {
 
 	// Env is the child's environment. nil means "inherit ours".
 	// Stage 3 will filter this (drop AWS_*, GITHUB_TOKEN, *_API_KEY unless the
-	// policy allows them); stage 0 just passes it through.
+	// policy allows them); stage 1 just passes it through.
 	Env []string
 
 	// Log receives every message in both directions. nil disables logging.
@@ -48,6 +48,11 @@ type Options struct {
 	// Grace is how long the server gets at each shutdown step before we
 	// escalate: wait -> terminate -> kill.
 	Grace time.Duration
+
+	// CallTTL is how long an unanswered request is remembered before it is
+	// written off. SweepEvery is how often that check runs.
+	CallTTL    time.Duration
+	SweepEvery time.Duration
 
 	// Stdin/Stdout/Stderr default to the process's own. Overridden in tests.
 	Stdin  io.Reader
@@ -58,6 +63,12 @@ type Options struct {
 func (o *Options) setDefaults() {
 	if o.Grace <= 0 {
 		o.Grace = 5 * time.Second
+	}
+	if o.CallTTL <= 0 {
+		o.CallTTL = 5 * time.Minute
+	}
+	if o.SweepEvery <= 0 {
+		o.SweepEvery = 30 * time.Second
 	}
 	if o.Stdin == nil {
 		o.Stdin = os.Stdin
@@ -70,14 +81,24 @@ func (o *Options) setDefaults() {
 	}
 }
 
-// Run starts the server and relays until either side goes away. It returns the
-// server's exit code, which the caller should exit with: to the client we must
-// be indistinguishable from the server itself.
-func Run(ctx context.Context, o Options) (int, error) {
+// Result is what the proxy learned about the connection it just carried.
+type Result struct {
+	ExitCode int
+	Session  *mcp.Session
+}
+
+// Run starts the server and relays until either side goes away. The returned
+// exit code is the server's, and the caller should exit with it: to the client
+// we must be indistinguishable from the server itself.
+func Run(ctx context.Context, o Options) (Result, error) {
 	if len(o.Argv) == 0 {
-		return 2, errors.New("proxy: empty server command")
+		return Result{ExitCode: 2}, errors.New("proxy: empty server command")
 	}
 	o.setDefaults()
+
+	session := mcp.NewSession()
+	corr := mcp.NewCorrelator(o.CallTTL)
+	res := Result{ExitCode: 1, Session: session}
 
 	cmd := exec.Command(o.Argv[0], o.Argv[1:]...)
 	cmd.Env = o.Env
@@ -88,23 +109,26 @@ func Run(ctx context.Context, o Options) (int, error) {
 
 	serverIn, err := cmd.StdinPipe()
 	if err != nil {
-		return 1, fmt.Errorf("proxy: stdin pipe: %w", err)
+		return res, fmt.Errorf("proxy: stdin pipe: %w", err)
 	}
 	serverOut, err := cmd.StdoutPipe()
 	if err != nil {
-		return 1, fmt.Errorf("proxy: stdout pipe: %w", err)
+		return res, fmt.Errorf("proxy: stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
-		return 127, fmt.Errorf("proxy: cannot start %q: %w", o.Argv[0], err)
+		res.ExitCode = 127
+		return res, fmt.Errorf("proxy: cannot start %q: %w", o.Argv[0], err)
 	}
 	o.Log.Event("start", map[string]any{"argv": o.Argv, "pid": cmd.Process.Pid})
+
+	observe := o.observer(session, corr)
 
 	// server -> client
 	s2cDone := make(chan struct{})
 	go func() {
 		defer close(s2cDone)
-		pump(DirServerToClient, serverOut, o.Stdout, o.Log)
+		o.pump(mcp.ServerToClient, serverOut, o.Stdout, observe)
 	}()
 
 	// client -> server.
@@ -114,11 +138,14 @@ func Run(ctx context.Context, o Options) (int, error) {
 	// shutdown forever whenever the server dies first. We let it outlive Run
 	// and die with the process.
 	go func() {
-		pump(DirClientToServer, o.Stdin, serverIn, o.Log)
+		o.pump(mcp.ClientToServer, o.Stdin, serverIn, observe)
 		// The client closed its end: propagate the EOF so a well-behaved
 		// server can shut itself down instead of being killed.
 		_ = serverIn.Close()
 	}()
+
+	sweepDone := o.startSweeper(corr)
+	defer close(sweepDone)
 
 	waitc := make(chan error, 1)
 	go func() { waitc <- cmd.Wait() }()
@@ -132,15 +159,99 @@ func Run(ctx context.Context, o Options) (int, error) {
 	}
 
 	code, err := reap(cmd, waitc, o.Grace)
-	o.Log.Event("exit", map[string]any{"code": code})
-	return code, err
+	res.ExitCode = code
+
+	client, server := session.Peers()
+	o.Log.Event("exit", map[string]any{
+		"code":      code,
+		"protocol":  session.ProtocolVersion(),
+		"client":    client.Name,
+		"server":    server.Name,
+		"tools":     len(session.Tools()),
+		"calls":     len(session.Calls()),
+		"in_flight": corr.InFlight(),
+	})
+	return res, err
+}
+
+// startSweeper expires unanswered requests in the background. Without it the
+// correlator grows for the whole session every time a server drops a reply.
+func (o *Options) startSweeper(corr *mcp.Correlator) chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(o.SweepEvery)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				for _, p := range corr.Expire() {
+					o.Log.Event("unanswered", map[string]any{
+						"dir":    string(p.Dir),
+						"id":     p.ID.String(),
+						"method": p.Method,
+						"age_s":  time.Since(p.Sent).Seconds(),
+					})
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	return done
+}
+
+// observer returns the callback pump uses to fold each frame into the session.
+//
+// Everything it notices is recorded as an event, never acted on. Anomalies are
+// worth seeing — an orphaned response or a reused id says something is wrong —
+// but stage 1 does not get to have an opinion about traffic.
+func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator) func(mcp.Direction, []byte) {
+	return func(dir mcp.Direction, frame []byte) {
+		msgs, _, err := mcp.ParseFrame(frame)
+		if err != nil {
+			o.Log.Event("unparseable", map[string]any{
+				"dir": string(dir),
+				"err": err.Error(),
+			})
+			return
+		}
+		for _, m := range msgs {
+			switch m.Kind {
+			case mcp.KindRequest:
+				if displaced, collision := corr.Track(dir, m); collision {
+					o.Log.Event("id-reuse", map[string]any{
+						"dir":       string(dir),
+						"id":        m.ID.String(),
+						"method":    m.Method,
+						"displaced": displaced.Method,
+					})
+				}
+				session.Observe(dir, m, nil)
+
+			case mcp.KindResponse, mcp.KindError:
+				p, ok := corr.Match(dir, m)
+				if !ok {
+					o.Log.Event("orphan-response", map[string]any{
+						"dir": string(dir),
+						"id":  m.ID.String(),
+					})
+					session.Observe(dir, m, nil)
+					continue
+				}
+				session.Observe(dir, m, &p)
+
+			default:
+				session.Observe(dir, m, nil)
+			}
+		}
+	}
 }
 
 // reap waits for the child, escalating politeness in steps of Grace:
 // plain wait, then terminate, then kill.
 func reap(cmd *exec.Cmd, waitc <-chan error, grace time.Duration) (int, error) {
 	steps := []func(){
-		func() {},                        // just wait: stdin EOF is usually enough
+		func() {},                         // just wait: stdin EOF is usually enough
 		func() { terminate(cmd.Process) }, // SIGTERM (see the per-OS files)
 		func() { _ = cmd.Process.Kill() },
 	}
@@ -173,21 +284,23 @@ func exitCode(err error) (int, error) {
 }
 
 // pump copies newline-delimited JSON-RPC messages from src to dst, logging each
-// one. Stage 0 neither parses nor modifies anything: bytes go through as-is.
-func pump(dir string, src io.Reader, dst io.Writer, log *SessionLog) {
+// one and handing it to observe. The bytes themselves are never modified, and
+// observation never gates the copy: relaying comes first.
+func (o *Options) pump(dir mcp.Direction, src io.Reader, dst io.Writer, observe func(mcp.Direction, []byte)) {
 	r := bufio.NewReaderSize(src, readBufSize)
 	for {
 		// NOT bufio.Scanner: its 64 KiB default silently truncates large tool
 		// results, and the symptom looks like "the server died for no reason".
 		line, err := r.ReadBytes('\n')
 		if len(line) > 0 {
-			log.Record(dir, line)
 			if _, werr := dst.Write(line); werr != nil {
 				return
 			}
 			// No flush on purpose. dst is an *os.File (or a pipe to one), so
 			// every Write is already a syscall. Wrapping it in a bufio.Writer
 			// here is exactly how you get "the client hangs for 30 seconds".
+			o.Log.Record(string(dir), line)
+			observe(dir, line)
 		}
 		if err != nil {
 			return

@@ -93,7 +93,7 @@ func TestTransparency(t *testing.T) {
 	opts.Stdout = &out
 	opts.Stderr = &errOut
 
-	code, err := proxy.Run(context.Background(), opts)
+	res, err := proxy.Run(context.Background(), opts)
 	if err != nil {
 		t.Fatalf("Run: %v (stderr: %s)", err, errOut.String())
 	}
@@ -101,8 +101,8 @@ func TestTransparency(t *testing.T) {
 		t.Fatalf("log.Close: %v", err)
 	}
 
-	if code != 0 {
-		t.Errorf("exit code = %d, want 0 (stderr: %s)", code, errOut.String())
+	if res.ExitCode != 0 {
+		t.Errorf("exit code = %d, want 0 (stderr: %s)", res.ExitCode, errOut.String())
 	}
 	if got := out.Bytes(); !bytes.Equal(got, want) {
 		t.Errorf("stream is not transparent: got %d bytes, want %d", len(got), len(want))

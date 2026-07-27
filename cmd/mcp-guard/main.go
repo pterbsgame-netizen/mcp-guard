@@ -2,11 +2,13 @@
 // mcp-guard launches the real server, and everything between them is relayed
 // unchanged and recorded.
 //
-// Stage 0 blocks nothing. It is a tap, not a guard, despite the name.
+// Through stage 1 it blocks nothing. It is a tap, not a guard, despite the name.
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -15,23 +17,57 @@ import (
 	"time"
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
+	"github.com/pterbsgame-netizen/mcp-guard/internal/replay"
 )
 
 const usage = `mcp-guard - a recording pass-through for MCP stdio servers.
 
 usage:
   mcp-guard [flags] -- <server-command> [server-args...]
+  mcp-guard replay [session.jsonl | log-dir]
 
-example:
+examples:
   mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
+  mcp-guard replay
 
 flags:
 `
 
 func main() {
-	logPath := flag.String("log", defaultLogPath(), `session log path (JSONL); "" disables logging`)
+	if len(os.Args) > 1 && os.Args[1] == "replay" {
+		os.Exit(runReplay(os.Args[2:]))
+	}
+	os.Exit(runProxy())
+}
+
+func runReplay(args []string) int {
+	path := defaultLogDir()
+	if len(args) == 1 {
+		path = args[0]
+	} else if len(args) > 1 {
+		fmt.Fprintln(os.Stderr, "usage: mcp-guard replay [session.jsonl | log-dir]")
+		return 2
+	}
+	// Buffered: a replayed session is thousands of small writes, and on a
+	// terminal each unbuffered one is a syscall.
+	out := bufio.NewWriter(os.Stdout)
+	err := replay.Path(out, path)
+	if flushErr := out.Flush(); err == nil {
+		err = flushErr
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runProxy() int {
+	logDir := flag.String("log-dir", defaultLogDir(), `directory for per-run session logs; "" disables logging`)
+	logPath := flag.String("log", "", `write to this single file instead of --log-dir; only safe with one proxy process`)
 	grace := flag.Duration("grace", 5*time.Second, "per-step grace period when shutting the server down")
 	maxLog := flag.Int64("log-max-bytes", proxy.DefaultMaxLogBytes, "rotate the session log past this size; 0 disables rotation")
+	callTTL := flag.Duration("call-ttl", 5*time.Minute, "how long an unanswered request is remembered before it is written off")
 	flag.Usage = func() {
 		fmt.Fprint(os.Stderr, usage)
 		flag.PrintDefaults()
@@ -41,39 +77,50 @@ func main() {
 	argv := flag.Args()
 	if len(argv) == 0 {
 		flag.Usage()
-		os.Exit(2)
+		return 2
 	}
 
-	log, err := proxy.OpenSessionLog(*logPath, *maxLog)
-	if err != nil {
+	open := func() (*proxy.SessionLog, error) {
+		if *logPath != "" {
+			return proxy.OpenSessionLog(*logPath, *maxLog)
+		}
+		return proxy.OpenSessionDir(*logDir, *maxLog)
+	}
+	log, err := open()
+	switch {
+	case errors.Is(err, proxy.ErrNotSecured):
+		// Worth saying out loud — the log holds every tool result verbatim —
+		// but not worth refusing to start and breaking the client's server.
+		fmt.Fprintf(os.Stderr, "mcp-guard: warning: %v\n", err)
+	case err != nil:
 		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 
 	// The client owns our lifecycle through stdin; a signal is the fallback.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	code, runErr := proxy.Run(ctx, proxy.Options{
-		Argv:  argv,
-		Log:   log,
-		Grace: *grace,
+	res, runErr := proxy.Run(ctx, proxy.Options{
+		Argv:    argv,
+		Log:     log,
+		Grace:   *grace,
+		CallTTL: *callTTL,
 	})
 	if runErr != nil {
 		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", runErr)
 	}
-	// Not deferred: os.Exit skips defers.
 	if err := log.Close(); err != nil {
 		fmt.Fprintf(os.Stderr, "mcp-guard: closing log: %v\n", err)
 	}
 	// Exit with the server's code: to the client we must look like the server.
-	os.Exit(code)
+	return res.ExitCode
 }
 
-func defaultLogPath() string {
+func defaultLogDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "mcp-guard-session.jsonl"
+		return "mcp-guard-sessions"
 	}
-	return filepath.Join(home, ".mcp-guard", "session.jsonl")
+	return filepath.Join(home, ".mcp-guard", "sessions")
 }

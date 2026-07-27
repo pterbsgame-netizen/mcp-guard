@@ -57,19 +57,38 @@ PATH="/c/msys64/ucrt64/bin:$PATH" CGO_ENABLED=1 go test -race ./...
 ## Use
 
 ```bash
-mcp-guard --log ~/.mcp-guard/session.jsonl -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
+mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
 ```
 
 Everything after `--` is the real server command. `mcp-guard` starts it, relays
-stdin/stdout/stderr unchanged, and appends one JSON object per message to the
-log.
+stdin/stdout/stderr unchanged, and writes one JSON object per message to a log.
 
-The log is rotated once it passes `--log-max-bytes` (64 MiB by default, `0`
-disables it): the current file is renamed with a UTC stamp and a fresh one is
-started. Nothing is deleted — the corpus is the point — so old segments are
-yours to prune. It adds up faster than it looks: a single `tools/list` response
-from a real server runs to ~15 KB, and the client repeats the handshake on every
-restart, so the log grows even on days when no tool is ever called.
+Each run gets its own file under `--log-dir` (`~/.mcp-guard/sessions` by
+default), named so the directory sorts chronologically. That is not tidiness: a
+client runs one proxy per configured server, so several are alive at once, and
+pointing them all at one file interleaves their sessions and turns rotation into
+a race between processes renaming the same file. `--log` writes to a single file
+instead, and is only safe with one proxy running.
+
+Logs are rotated past `--log-max-bytes` (64 MiB by default, `0` disables it).
+Nothing is ever deleted — the corpus is the point — so old segments are yours to
+prune. It adds up faster than it looks: one `tools/list` response from a real
+server runs to ~15 KB, and the client repeats the handshake on every restart, so
+the corpus grows even on days when no tool is ever called.
+
+### Reading a session back
+
+```bash
+mcp-guard replay
+```
+
+With no argument it replays every log in the default directory; give it a file
+or a directory to replay that instead. Output is a transcript: direction, method
+names, which reply answered which request and how long it took, the tool each
+`tools/call` targeted, and a per-run summary of the negotiated protocol version,
+the advertised tools and the calls that failed. It is offline and deterministic
+— no server is started and nothing is contacted, so the same log always produces
+the same transcript.
 
 ### Wiring into a client
 
@@ -102,20 +121,23 @@ result: file contents, API responses, and any credential the agent happened to
 read along the way. It is in `.gitignore`. Treat it like a password file, and do
 not paste it into an issue.
 
-**On Windows the log is not yet protected by file permissions.** It is opened
-with mode `0600`, but Go's permission bits are almost entirely ignored on
-Windows: the file simply inherits the parent directory's ACL. Verified on a real
-session — the resulting ACL was `SYSTEM`, `Administrators` and the owning user,
-all `FullControl`. Restricting it properly needs an explicit security descriptor
-via `golang.org/x/sys/windows`, which is a stage-1 task. Until then, put the log
-somewhere already protected and do not assume the mode argument did anything.
+Permissions are restricted to the owning user. On Unix that is just the `0600`
+the file is created with. On Windows the mode argument is very nearly a no-op —
+it maps only to the read-only attribute, and the file otherwise inherits the
+directory ACL, which on a stock profile hands `SYSTEM` and `Administrators` full
+control — so the DACL is set explicitly instead: protected, inheritance severed,
+one allow-all entry for the owning user. This is the only reason the project
+depends on anything outside the standard library.
+
+If that fails, `mcp-guard` says so on stderr and keeps going rather than taking
+the client's server down with it.
 
 ## Roadmap
 
 | Stage | What | State |
 |---|---|---|
 | 0 | Transparent pipe + session log | **done** |
-| 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | next |
+| 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | **done** |
 | 2 | Tool pinning: `approve` → `mcp-guard.lock`, canonicalised schema hashes | |
 | 3 | Effect policy + taint propagation ← the actual product | |
 | 4 | Content normalisation, advisory signals, an `eval` metrics harness | |

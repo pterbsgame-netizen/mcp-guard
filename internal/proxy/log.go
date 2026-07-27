@@ -2,11 +2,15 @@ package proxy
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +41,11 @@ type SessionLog struct {
 	w   io.WriteCloser
 	seq uint64
 
+	// sid identifies this proxy run. The log is shared across runs and seq
+	// restarts at 1 in every process, so without it a reader has no way to tell
+	// two appended sessions apart.
+	sid string
+
 	// Rotation state. path is empty for logs not backed by a file, which
 	// disables rotation entirely.
 	path     string
@@ -44,15 +53,54 @@ type SessionLog struct {
 	size     int64
 }
 
-// OpenSessionLog opens (creating or appending to) the log at path.
+// ErrNotSecured reports that the log was opened but its permissions could not
+// be restricted. The log is usable; it is just readable by more accounts than
+// intended, which is worth telling the user about rather than dying over.
+var ErrNotSecured = errors.New("session log permissions could not be restricted")
+
+// newSessionID returns a short random identifier for one proxy run.
+func newSessionID() string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Only reachable if the OS entropy source is broken. A timestamp is a
+		// poor identifier but better than colliding on the empty string.
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// OpenSessionDir opens a log file for this run inside dir, named so that runs
+// sort chronologically.
+//
+// This is the form to prefer. A client runs one proxy per configured server, so
+// several are alive at once, and pointing them all at a single file interleaves
+// their sessions and makes rotation a race — two processes renaming the same
+// file, one clobbering what the other just created. One file per run removes
+// both problems, and replay reassembles the corpus from the directory.
+func OpenSessionDir(dir string, maxBytes int64) (*SessionLog, error) {
+	if dir == "" {
+		return nil, nil
+	}
+	sid := newSessionID()
+	name := time.Now().UTC().Format("20060102T150405Z") + "-" + sid + ".jsonl"
+	return openSessionLog(filepath.Join(dir, name), maxBytes, sid)
+}
+
+// OpenSessionLog opens (creating or appending to) a single log file at path.
 // An empty path returns a nil log, which discards all records.
+//
+// Only one process may write to a given path: see OpenSessionDir.
 //
 // When the file grows past maxBytes it is renamed aside with a UTC timestamp
 // and a fresh one is started; maxBytes <= 0 disables rotation.
 //
 // The file is opened 0600, but note that on Windows Go's permission bits are
-// effectively ignored and the file inherits the directory ACL. See README.
+// effectively ignored, so the ACL is set explicitly. See README.
 func OpenSessionLog(path string, maxBytes int64) (*SessionLog, error) {
+	return openSessionLog(path, maxBytes, newSessionID())
+}
+
+func openSessionLog(path string, maxBytes int64, sid string) (*SessionLog, error) {
 	if path == "" {
 		return nil, nil
 	}
@@ -65,11 +113,22 @@ func OpenSessionLog(path string, maxBytes int64) (*SessionLog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("session log: %w", err)
 	}
-	l := &SessionLog{w: f, path: path, maxBytes: maxBytes}
+	l := &SessionLog{w: f, path: path, maxBytes: maxBytes, sid: sid}
 	if fi, err := f.Stat(); err == nil {
 		l.size = fi.Size()
 	}
+	if secErr := secureFile(path); secErr != nil {
+		return l, fmt.Errorf("%w: %v", ErrNotSecured, secErr)
+	}
 	return l, nil
+}
+
+// SessionID identifies this proxy run in the log.
+func (l *SessionLog) SessionID() string {
+	if l == nil {
+		return ""
+	}
+	return l.sid
 }
 
 // NewSessionLog wraps an arbitrary writer. Rotation is disabled. Used by tests.
@@ -90,7 +149,7 @@ func (l *SessionLog) Record(dir string, line []byte) {
 	l.seq++
 
 	var b bytes.Buffer
-	fmt.Fprintf(&b, `{"seq":%d,"t":%q,"dir":%q,`, l.seq, now(), dir)
+	fmt.Fprintf(&b, `{"seq":%d,"sid":%q,"t":%q,"dir":%q,`, l.seq, l.sid, now(), dir)
 	if json.Valid(msg) {
 		b.WriteString(`"msg":`)
 		b.Write(msg)
@@ -123,6 +182,7 @@ func (l *SessionLog) Event(name string, fields map[string]any) {
 	defer l.mu.Unlock()
 	l.seq++
 	rec["seq"] = l.seq
+	rec["sid"] = l.sid
 	rec["t"] = now()
 	enc, err := json.Marshal(rec)
 	if err != nil {
@@ -196,6 +256,10 @@ func (l *SessionLog) rotate() {
 	if fi, err := f.Stat(); err == nil {
 		l.size = fi.Size()
 	}
+	// The fresh file inherits the directory ACL again, so it has to be
+	// re-restricted. Nothing to do on failure but keep going: the alternative
+	// is dropping the corpus.
+	_ = secureFile(l.path)
 }
 
 type discardCloser struct{}
