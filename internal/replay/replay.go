@@ -238,6 +238,18 @@ func callDetail(m mcp.Message) string {
 }
 
 func printEvent(w io.Writer, raw []byte, rec record) {
+	// The server's own logging reads better as text than as an event with
+	// fields, and it is usually what explains everything around it.
+	if rec.Ev == "stderr" {
+		var line struct {
+			Line string `json:"line"`
+		}
+		if json.Unmarshal(raw, &line) == nil {
+			fmt.Fprintf(w, "  !   %s\n", line.Line)
+			return
+		}
+	}
+
 	var fields map[string]any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	// Without this every number decodes to float64 and prints in scientific

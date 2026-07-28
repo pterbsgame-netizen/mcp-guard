@@ -140,6 +140,7 @@ func assertLog(t *testing.T, path string, streamBytes int) {
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64<<10), 16<<20) // the log has 2 MiB lines in it
 	var events []string
+	var stderrLines []string
 	counts := map[string]int{}
 	var lastSeq uint64
 	for sc.Scan() {
@@ -152,6 +153,17 @@ func assertLog(t *testing.T, path string, streamBytes int) {
 		}
 		lastSeq = r.Seq
 		if r.Ev != "" {
+			// The server's own logging is interleaved by timing, so it is
+			// checked for content rather than position.
+			if r.Ev == "stderr" {
+				var line struct {
+					Line string `json:"line"`
+				}
+				if json.Unmarshal(sc.Bytes(), &line) == nil {
+					stderrLines = append(stderrLines, line.Line)
+				}
+				continue
+			}
 			events = append(events, r.Ev)
 			continue
 		}
@@ -169,6 +181,13 @@ func assertLog(t *testing.T, path string, streamBytes int) {
 	// is not evidence of anything.
 	if want := []string{"start", "enforcement", "exit"}; !equalStrings(events, want) {
 		t.Errorf("events = %v, want %v", events, want)
+	}
+
+	// The server's stderr is relayed and also recorded. A log that says a
+	// server exited without saying why sends whoever is debugging out of the
+	// tool and into reproducing it by hand.
+	if !containsSubstring(stderrLines, "helper: up") {
+		t.Errorf("the server's stderr was not recorded in the log, got %v", stderrLines)
 	}
 	if counts[proxy.DirClientToServer] != 4 {
 		t.Errorf("c2s records = %d, want 4", counts[proxy.DirClientToServer])
@@ -752,7 +771,7 @@ func TestObserveModeLetsItThrough(t *testing.T) {
 // This is the half of the stage-3 criterion that decides whether the tool
 // survives: catching CurXecute is worth nothing if ordinary work also trips.
 // It is skipped unless MCPGUARD_CORPUS points at a log, and it reports how many
-// calls it actually judged вЂ” a corpus with no tool calls in it proves nothing,
+// calls it actually judged - a corpus with no tool calls in it proves nothing,
 // and saying so is the point.
 func TestCorpusPolicy(t *testing.T) {
 	path := os.Getenv("MCPGUARD_CORPUS")
@@ -821,6 +840,82 @@ func TestNilLogIsSafe(t *testing.T) {
 	if err := log.Close(); err != nil {
 		t.Errorf("Close on nil log: %v", err)
 	}
+}
+
+func containsSubstring(lines []string, want string) bool {
+	for _, l := range lines {
+		if strings.Contains(l, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestStderrIsRelayedAndRecorded: both halves matter. Swallowing stderr turns
+// every server-side error into "it just doesn't work"; not recording it means a
+// transcript can say a server exited but never why, which is what sent the
+// first real production failure out of this tool and into reproducing by hand.
+func TestStderrIsRelayedAndRecorded(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "session.jsonl")
+	log, err := proxy.OpenSessionLog(logPath, 0)
+	if err != nil {
+		t.Fatalf("OpenSessionLog: %v", err)
+	}
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	var out bytes.Buffer
+	relayed := &lockedBuffer{}
+	_, err = proxy.Run(context.Background(), proxy.Options{
+		Argv:   []string{self, "-test.run=^TestHelperNoisyServer$"},
+		Env:    append(os.Environ(), noisyEnv+"=1"),
+		Stdin:  bytes.NewReader(nil),
+		Stdout: &out,
+		Stderr: relayed,
+		Log:    log,
+		Grace:  5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatalf("log.Close: %v", err)
+	}
+
+	const marker = "ImportError: cannot import name"
+	if !strings.Contains(relayed.String(), marker) {
+		t.Errorf("stderr was not relayed to the client:\n%s", relayed.String())
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if !strings.Contains(string(data), marker) {
+		t.Errorf("stderr was not recorded in the session log:\n%s", data)
+	}
+	// The line without a trailing newline is often the one a server died in the
+	// middle of, so it must survive too.
+	if !strings.Contains(string(data), "died mid-line") {
+		t.Errorf("the unterminated final line was dropped:\n%s", data)
+	}
+}
+
+// noisyEnv switches this binary into a server that only writes to stderr and
+// exits, the way a server with a broken dependency does.
+const noisyEnv = "MCPGUARD_TEST_NOISY"
+
+func TestHelperNoisyServer(t *testing.T) {
+	if os.Getenv(noisyEnv) != "1" {
+		t.Skip("not a helper invocation")
+	}
+	fmt.Fprintln(os.Stderr, "Traceback (most recent call last):")
+	fmt.Fprintln(os.Stderr, `  File "server.py", line 6, in <module>`)
+	fmt.Fprintln(os.Stderr, "ImportError: cannot import name 'McpError' from 'mcp.shared.exceptions'")
+	fmt.Fprint(os.Stderr, "died mid-line") // no newline, on purpose
+	os.Exit(1)
 }
 
 func equalStrings(a, b []string) bool {

@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -28,6 +29,87 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.w.Write(p)
+}
+
+// maxStderrRecorded caps how much of a server's stderr goes into the session
+// log. A traceback is a few kilobytes; a server stuck in a logging loop is not
+// worth a gigabyte of disk.
+const maxStderrRecorded = 64 << 10
+
+// stderrTee relays the server's stderr and records a copy.
+//
+// "Never swallow stderr" still holds: every byte reaches the client exactly as
+// before, and the relay happens first so a slow log cannot delay it. The copy
+// exists because a session log saying "exited code=1" without saying why sends
+// whoever is debugging out of the tool and into reproducing by hand - which is
+// exactly what happened the first time a real server died in production.
+type stderrTee struct {
+	w   io.Writer
+	log *SessionLog
+
+	mu        sync.Mutex
+	partial   []byte
+	recorded  int
+	truncated bool
+}
+
+func (t *stderrTee) Write(p []byte) (int, error) {
+	n, err := t.w.Write(p)
+	t.record(p[:n])
+	return n, err
+}
+
+// record accumulates whole lines and logs them one at a time, so a traceback
+// stays greppable instead of arriving as one blob.
+func (t *stderrTee) record(p []byte) {
+	if t.log == nil || len(p) == 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.truncated {
+		return
+	}
+
+	t.partial = append(t.partial, p...)
+	for {
+		i := bytes.IndexByte(t.partial, '\n')
+		if i < 0 {
+			break
+		}
+		line := bytes.TrimRight(t.partial[:i], "\r")
+		t.partial = t.partial[i+1:]
+		if len(line) == 0 {
+			continue
+		}
+		if t.recorded+len(line) > maxStderrRecorded {
+			t.truncated = true
+			t.log.Event("stderr-truncated", map[string]any{"after_bytes": t.recorded})
+			return
+		}
+		t.recorded += len(line)
+		t.log.Event("stderr", map[string]any{"line": string(line)})
+	}
+	// An unterminated tail is kept, but not without limit: a server writing a
+	// megabyte with no newline must not grow this buffer forever.
+	if len(t.partial) > maxStderrRecorded {
+		t.partial = t.partial[:0]
+	}
+}
+
+// flush records whatever the server wrote without a trailing newline, which is
+// often the most interesting line: the one it died in the middle of.
+func (t *stderrTee) flush() {
+	if t.log == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	line := bytes.TrimRight(t.partial, "\r\n")
+	t.partial = nil
+	if len(line) > 0 && !t.truncated {
+		t.log.Event("stderr", map[string]any{"line": string(line)})
+	}
 }
 
 // pendingCall is a tools/call waiting for its answer, remembered so the answer
@@ -89,7 +171,7 @@ func (g *guard) counts() (blocked, relayed int) {
 // expire drops call attributions older than ttl.
 //
 // Without it the map grows for the whole session on every reply a server never
-// sends — the same leak the correlator has a sweeper for, one map to the side.
+// sends - the same leak the correlator has a sweeper for, one map to the side.
 func (g *guard) expire(ttl time.Duration) int {
 	if ttl <= 0 {
 		return 0

@@ -128,12 +128,22 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	corr := mcp.NewCorrelator(o.CallTTL)
 	res := Result{ExitCode: 1, Session: session}
 
+	// Everything the client receives goes through one writer, from either
+	// goroutine, so messages cannot interleave. The server's stderr and our own
+	// notices share a second one for the same reason.
+	notices := &syncWriter{w: o.Stderr}
+	notice := func(format string, args ...any) {
+		fmt.Fprintf(notices, "mcp-guard: "+format+"\n", args...)
+	}
+
 	cmd := exec.Command(o.Argv[0], o.Argv[1:]...)
 	cmd.Env = o.Env
-	// stderr is relayed 1:1 and never captured or parsed. MCP servers log
-	// there and clients surface it to the user; swallowing it turns every
-	// server-side error into "it just doesn't work".
-	cmd.Stderr = o.Stderr
+	// stderr is relayed 1:1 and never swallowed. MCP servers log there and
+	// clients surface it to the user; capturing it turns every server-side
+	// error into "it just doesn't work". A copy also goes to the session log,
+	// so a transcript can say why a server exited rather than only that it did.
+	errTee := &stderrTee{w: notices, log: o.Log}
+	cmd.Stderr = errTee
 
 	serverIn, err := cmd.StdinPipe()
 	if err != nil {
@@ -150,15 +160,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	}
 	o.Log.Event("start", map[string]any{"argv": o.Argv, "pid": cmd.Process.Pid})
 
-	// Everything the client receives goes through one writer, from either
-	// goroutine, so messages cannot interleave. Our own stderr notices share a
-	// writer for the same reason.
 	toClient := &syncWriter{w: o.Stdout}
-	notices := &syncWriter{w: o.Stderr}
-	notice := func(format string, args ...any) {
-		fmt.Fprintf(notices, "mcp-guard: "+format+"\n", args...)
-	}
-
 	g := newGuard(&o, session, notice)
 	observe := o.observer(session, corr, g)
 
@@ -209,6 +211,10 @@ func Run(ctx context.Context, o Options) (Result, error) {
 
 	code, err := reap(cmd, waitc, o.Grace)
 	res.ExitCode = code
+
+	// Whatever the server wrote without a trailing newline is often the line it
+	// died in the middle of, so it is recorded rather than dropped.
+	errTee.flush()
 
 	client, server := session.Peers()
 	blocked, relayed := g.counts()
