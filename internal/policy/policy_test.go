@@ -179,11 +179,37 @@ func TestExecClass(t *testing.T) {
 		t.Errorf("tainted session: action = %q, want deny", v.Action)
 	}
 
-	if !p.IsTaintSource("fetch_url") {
-		t.Error("fetch_url should be a taint source")
-	}
 	if p.IsTaintSource("write_file") {
 		t.Error("write_file should not be a taint source")
+	}
+}
+
+// TestRealTaintSources names tools from servers actually in use, not invented
+// ones. The patterns are globs, and "*fetch*" matching the bare name "fetch"
+// depends on * accepting an empty match — worth pinning rather than assuming,
+// since the official fetch server calls its only tool exactly that.
+func TestRealTaintSources(t *testing.T) {
+	p := Default()
+	for _, tool := range []string{
+		"fetch",              // mcp-server-fetch, the whole tool surface
+		"fetch_url",          // the shape most wrappers use
+		"web_search",         // search servers
+		"brave_web_search",   // and their branded variants
+		"read_media_file",    // filesystem: returns whatever a file contains
+		"get_issue",          // issue trackers
+		"slack_get_messages", //
+	} {
+		if !p.IsTaintSource(tool) {
+			t.Errorf("%q is not recognised as a taint source; the escalation never fires for it", tool)
+		}
+	}
+
+	// Tools that act rather than bring content in must not taint, or every
+	// session is tainted from its first write and the level means nothing.
+	for _, tool := range []string{"write_file", "edit_file", "move_file", "create_directory"} {
+		if p.IsTaintSource(tool) {
+			t.Errorf("%q taints the session; it brings in no outside content", tool)
+		}
 	}
 }
 

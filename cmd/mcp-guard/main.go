@@ -36,6 +36,7 @@ usage:
   mcp-guard replay [session.jsonl | log-dir]
   mcp-guard verify [--write] [config-file...]
   mcp-guard watch [config-file...]
+  mcp-guard eval [--attack dir] [--benign log-or-dir]
 
 examples:
   mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp

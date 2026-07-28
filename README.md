@@ -147,7 +147,11 @@ anywhere. Write your own with `--policy path/to/rules.yaml`; the built-in set is
 `internal/policy/default.yaml`.
 
 **Taint.** A result from a tool that brings in content nobody vouches for —
-fetched pages, mail, issues — marks the session. Nothing is blocked for that
+fetched pages, mail, issues — marks the session. Which tools those are is a
+list of name patterns in the policy; the official fetch server's only tool is
+called `fetch`, and a test pins that it and the other common spellings are
+actually recognised, because a taint source nobody matches is a stage that
+never runs. Nothing is blocked for that
 reason alone; it tightens what the rules already say, so a write that is
 ordinary during honest work becomes something to confirm afterwards. The
 decision is about where the content came from, not what it says, which is why
@@ -364,13 +368,27 @@ someone's workflow on day one gets uninstalled on day one.
 
 ### What is not proven yet
 
-The false-positive rate. The attack side is covered by tests — CurXecute is
-refused at the write, a silently swapped tool description is caught, a rewritten
-config is reported — but "ordinary work never trips" is only as good as the
-corpus it was measured on, and the corpus here contains no tool calls yet.
-`MCPGUARD_CORPUS=<log> go test ./internal/proxy/` runs the policy over a
-recorded session and says how many calls it actually judged. Until that number
-is large, treat enforce mode as untested on real traffic.
+The false-positive rate, and it is worth being precise about why.
+
+The attack side is covered by tests — CurXecute is refused at the write, a
+silently swapped tool description is caught, a rewritten config is reported.
+Taint has now fired end to end against the real fetch server, so the escalation
+is not just tested in isolation.
+
+"Ordinary work never trips" is the claim with no evidence behind it. It can only
+be measured against real sessions, and a corpus is only as good as the surface
+it covers: one filesystem server scoped to a single project directory exercises
+a handful of rules and none of the rest. A zero measured there means "little was
+attempted", not "the rules are good", and reporting it as a false-positive rate
+would be dressing up an absence of data.
+
+```bash
+mcp-guard eval --benign ~/.mcp-guard/sessions
+```
+
+reports how many calls it actually judged alongside the rate, so the two are
+never confused. Until that count is large and varied, treat enforcement as
+untested on real traffic.
 
 ## Notes on Windows
 
