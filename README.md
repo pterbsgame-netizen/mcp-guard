@@ -153,13 +153,61 @@ ordinary during honest work becomes something to confirm afterwards. The
 decision is about where the content came from, not what it says, which is why
 rewording does not defeat it.
 
-Default is observe. `--enforce`, or `mode: enforce` in the policy, acts on
-verdicts instead of recording them.
+### Three levels
 
-**What `confirm` does today.** It refuses, with an explanation. The protocol has
-`elicitation/create` for asking the user, but that needs client support that
-cannot be assumed yet, so there is no way to ask from inside a stdio proxy.
-Refusing and saying so beats pretending to have asked.
+| level | `deny` | `confirm` |
+|---|---|---|
+| `observe` (default) | recorded | recorded |
+| `enforce` | **refused** | recorded, announced on stderr, relayed |
+| `strict` | **refused** | **refused** |
+
+```bash
+mcp-guard -enforce -- npx ...
+```
+
+`-enforce=strict` refuses confirms too; `-enforce=off` goes back to observing.
+
+The two lists are not the same kind of thing, which is why they are not
+enforced together. `deny` covers credentials, agent configuration and shell
+startup files — places honest work never writes. `confirm` covers
+`package.json`, Makefiles and shell scripts, which it writes all day. A guard
+that refuses the second kind on the day it is switched on is switched off the
+same day, and then it guards nothing at all.
+
+`mode:` in the policy file takes the same three values. **The flag wins when
+both are set**, in either direction: a policy file is meant to be committed and
+may belong to somebody else, while whoever is unbreaking this at nine in the
+morning owns the client config.
+
+Pin mismatches are their own case. A tool that *changed* since you approved it
+is refused whenever enforcing — it is rare, precise, and the refusal names the
+cure. A tool list that could not be checked at all is only held at `strict`:
+"we do not know" is a far weaker claim than "it changed", and under enforcement
+its blast radius would be the whole server dying over one malformed schema.
+
+**What `confirm` does at `strict`.** It refuses, with an explanation. The
+protocol has `elicitation/create` for asking the user, but no client seen so far
+declares it — mcp-guard now records what each side declared during the
+handshake, so that claim can be checked against the logs instead of assumed.
+Until one does, there is no way to ask from inside a stdio proxy, and refusing
+while saying so beats pretending to have asked.
+
+### If it goes wrong
+
+```bash
+MCPGUARD_OFF=1
+```
+
+Set that in the client's environment and mcp-guard relays with no checks at
+all: no pin check, no policy, no content scan. It is read before any
+configuration file is opened, so a typo in a policy — otherwise a refusal to
+start, and therefore an MCP server that simply never appears in the client —
+cannot cost you your tools. Only affirmative values count, so `MCPGUARD_OFF=0`
+does not disarm the guard.
+
+The session log keeps being written and records `from: "off"`, so an
+unprotected session is identifiable afterwards rather than silently
+indistinguishable from a guarded one.
 
 ### Content signals, which never block
 

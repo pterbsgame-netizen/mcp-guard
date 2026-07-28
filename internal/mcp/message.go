@@ -219,19 +219,62 @@ func isJSONNull(raw json.RawMessage) bool {
 // This is what makes blocking safe: a dropped message leaves the peer waiting
 // until it times out, with nothing to show the user. A blocked message must
 // always be answered, with the same id and a reason a human can read.
-func NewError(id ID, code int, message string) ([]byte, error) {
-	idRaw := id.Raw()
-	if !id.Set() {
-		idRaw = json.RawMessage("null")
-	}
-	msg, err := json.Marshal(message)
-	if err != nil {
-		return nil, err
+//
+// It cannot fail. Marshalling a Go string is infallible, and the caller of a
+// refusal has no useful way to handle an error anyway — the one thing it must
+// never do is fall back to letting the message through.
+func NewError(id ID, code int, message string) []byte {
+	var b bytes.Buffer
+	b.WriteString(`{"jsonrpc":"2.0","id":`)
+	b.Write(idOrNull(id))
+	fmt.Fprintf(&b, `,"error":{"code":%d,"message":`, code)
+	b.Write(quote(message))
+	b.WriteString("}}\n")
+	return b.Bytes()
+}
+
+// NewErrorBatch answers a batched frame with a batched reply: one error per
+// request id, in the order they arrived.
+//
+// A batch has to be answered with an array. A client that sent one and got back
+// a bare object has no way to match the reply to anything, which is the same
+// hang as sending nothing at all. Returns nil for an empty list, since a batch
+// of pure notifications is owed no reply.
+func NewErrorBatch(ids []ID, code int, message string) []byte {
+	if len(ids) == 0 {
+		return nil
 	}
 	var b bytes.Buffer
-	fmt.Fprintf(&b, `{"jsonrpc":"2.0","id":%s,"error":{"code":%d,"message":%s}}`+"\n",
-		idRaw, code, msg)
-	return b.Bytes(), nil
+	b.WriteByte('[')
+	for i, id := range ids {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteString(`{"jsonrpc":"2.0","id":`)
+		b.Write(idOrNull(id))
+		fmt.Fprintf(&b, `,"error":{"code":%d,"message":`, code)
+		b.Write(quote(message))
+		b.WriteString("}}")
+	}
+	b.WriteString("]\n")
+	return b.Bytes()
+}
+
+func idOrNull(id ID) json.RawMessage {
+	if !id.Set() {
+		return json.RawMessage("null")
+	}
+	return id.Raw()
+}
+
+// quote renders a string as a JSON string, substituting a fixed message in the
+// case json.Marshal is documented not to reach.
+func quote(s string) []byte {
+	enc, err := json.Marshal(s)
+	if err != nil {
+		return []byte(`"blocked by mcp-guard"`)
+	}
+	return enc
 }
 
 // JSON-RPC reserved error codes, plus the range MCP leaves to applications.

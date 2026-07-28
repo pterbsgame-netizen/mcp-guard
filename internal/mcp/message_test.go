@@ -163,10 +163,7 @@ func TestNewErrorEchoesID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parseID(%s): %v", raw, err)
 		}
-		out, err := NewError(id, CodeBlocked, `blocked by policy: write to "~/.ssh"`)
-		if err != nil {
-			t.Fatalf("NewError: %v", err)
-		}
+		out := NewError(id, CodeBlocked, `blocked by policy: write to "~/.ssh"`)
 		msgs, _, err := ParseFrame(out)
 		if err != nil {
 			t.Fatalf("NewError produced an unparseable frame %s: %v", out, err)
@@ -184,11 +181,47 @@ func TestNewErrorEchoesID(t *testing.T) {
 	}
 
 	// A message we could not parse has no id to echo; null is the spec's answer.
-	out, err := NewError(ID{}, CodeParseError, "unparseable")
-	if err != nil {
-		t.Fatalf("NewError: %v", err)
-	}
+	out := NewError(ID{}, CodeParseError, "unparseable")
 	if !strings.Contains(string(out), `"id":null`) {
 		t.Errorf("absent id should serialise as null, got %s", out)
+	}
+}
+
+// TestNewErrorBatch: a client that sent an array and gets back a bare object
+// cannot match the reply to anything, which hangs it exactly as dropping the
+// message would.
+func TestNewErrorBatch(t *testing.T) {
+	ids := make([]ID, 0, 3)
+	for _, raw := range []string{`1`, `"two"`, `3`} {
+		id, err := parseID(json.RawMessage(raw))
+		if err != nil {
+			t.Fatalf("parseID(%s): %v", raw, err)
+		}
+		ids = append(ids, id)
+	}
+
+	out := NewErrorBatch(ids, CodeBlocked, "refused")
+	msgs, batched, err := ParseFrame(out)
+	if err != nil {
+		t.Fatalf("NewErrorBatch produced an unparseable frame %s: %v", out, err)
+	}
+	if !batched {
+		t.Error("the reply to a batch must itself be a batch")
+	}
+	if len(msgs) != len(ids) {
+		t.Fatalf("got %d replies, want %d", len(msgs), len(ids))
+	}
+	for i, m := range msgs {
+		if m.Kind != KindError {
+			t.Errorf("reply %d is %v, want an error", i, m.Kind)
+		}
+		if string(m.ID.Raw()) != string(ids[i].Raw()) {
+			t.Errorf("reply %d has id %s, want %s (order must be preserved)", i, m.ID.Raw(), ids[i].Raw())
+		}
+	}
+
+	// A batch of pure notifications is owed no reply at all.
+	if out := NewErrorBatch(nil, CodeBlocked, "refused"); out != nil {
+		t.Errorf("an empty id list produced %q, want nothing", out)
 	}
 }

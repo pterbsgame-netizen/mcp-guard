@@ -60,15 +60,27 @@ func (b BenignReport) Span() time.Duration {
 	return b.Last.Sub(b.First)
 }
 
-// BlocksPerWeek is the number the plan calls the only one that predicts whether
-// a tool survives. It is meaningless without a span, and says so by returning
-// false rather than a confident zero.
-func (b BenignReport) BlocksPerWeek() (float64, bool) {
+// BlocksPerWeekAt is the number that predicts whether a tool survives, at one
+// enforcement level.
+//
+// It has to be per level, because the levels differ by an order of magnitude:
+// enforce refuses only deny, which honest work never triggers, while strict
+// also refuses confirm, which it triggers all day. The difference between the
+// two lines is the whole argument for having levels at all.
+//
+// Meaningless without a span, and says so by returning false rather than a
+// confident zero.
+func (b BenignReport) BlocksPerWeekAt(m policy.Mode) (float64, bool) {
 	span := b.Span()
 	if span < time.Hour {
 		return 0, false
 	}
-	blocked := b.Verdicts[policy.Deny] + b.Verdicts[policy.Confirm]
+	var blocked int
+	for action, n := range b.Verdicts {
+		if m.Blocks(action) {
+			blocked += n
+		}
+	}
 	return float64(blocked) * float64(7*24*time.Hour) / float64(span), true
 }
 
@@ -313,8 +325,10 @@ func Report(w io.Writer, attack *AttackReport, benign *BenignReport) {
 	fmt.Fprintf(w, "  content: %d/%d results reached the threshold\n", benign.Tainting, benign.Results)
 	printCounts(w, "  signature", benign.RuleHits)
 
-	if rate, ok := benign.BlocksPerWeek(); ok {
-		fmt.Fprintf(w, "  blocks per week of this traffic: %.1f\n", rate)
+	enforce, ok := benign.BlocksPerWeekAt(policy.Enforce)
+	strict, _ := benign.BlocksPerWeekAt(policy.Strict)
+	if ok {
+		fmt.Fprintf(w, "  blocks per week of this traffic:  %.1f at enforce, %.1f at strict\n", enforce, strict)
 	} else {
 		fmt.Fprintln(w, "  blocks per week: not enough elapsed time to say")
 	}

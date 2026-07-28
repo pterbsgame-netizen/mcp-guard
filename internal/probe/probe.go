@@ -187,11 +187,8 @@ func (s *session) call(ctx context.Context, id int, method string, params any) (
 				case mcp.KindRequest:
 					// We advertise no capabilities, so anything the server asks
 					// for is something we cannot provide. Say so, promptly.
-					reply, err := mcp.NewError(m.ID, mcp.CodeMethodNotFound,
-						"mcp-guard probe supports no client capabilities")
-					if err == nil {
-						_, _ = s.in.Write(reply)
-					}
+					_, _ = s.in.Write(mcp.NewError(m.ID, mcp.CodeMethodNotFound,
+						"mcp-guard probe supports no client capabilities"))
 				}
 			}
 		}

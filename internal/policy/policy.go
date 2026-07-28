@@ -53,7 +53,7 @@ func (a Action) severity() int {
 	return 0
 }
 
-// Mode decides whether verdicts are acted on or only recorded.
+// Mode decides which verdicts are acted on and which are only recorded.
 type Mode string
 
 const (
@@ -61,8 +61,52 @@ const (
 	// the default, and it is the only reason a tool like this survives its
 	// first week on someone's machine.
 	Observe Mode = "observe"
+
+	// Enforce blocks deny and relays confirm. The two lists are not the same
+	// kind of thing: deny covers credentials, agent configuration and shell
+	// startup files, which ordinary work never writes, while confirm covers
+	// package.json, Makefiles and shell scripts, which it writes constantly.
+	// Refusing the second kind breaks the workflow on day one, and a tool that
+	// does that is uninstalled on day one.
 	Enforce Mode = "enforce"
+
+	// Strict blocks confirm as well. Worth having, worth not defaulting to.
+	Strict Mode = "strict"
 )
+
+// ParseMode reads a level from a flag or a config file.
+//
+// The spellings are generous in one direction only: "off" and "deny" and "all"
+// say what they do at a glance, but nothing here quietly maps an unknown word
+// onto a working default. A typo in an enforcement level must be an error.
+func ParseMode(s string) (Mode, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "observe", "off", "false", "0", "no":
+		return Observe, nil
+	case "enforce", "deny", "true", "1", "yes", "on":
+		return Enforce, nil
+	case "strict", "all":
+		return Strict, nil
+	}
+	return "", fmt.Errorf("policy: unknown enforcement level %q (want observe, enforce or strict)", s)
+}
+
+// Blocks reports whether an action is refused at this level.
+//
+// This is the only place the graduation lives. Anything that re-derives it from
+// a boolean is how "enforce" quietly starts meaning "strict" again.
+func (m Mode) Blocks(a Action) bool {
+	switch m {
+	case Enforce:
+		return a == Deny
+	case Strict:
+		return a == Deny || a == Confirm
+	}
+	return false
+}
+
+// Enforcing reports whether this level acts on anything at all.
+func (m Mode) Enforcing() bool { return m != "" && m != Observe }
 
 // Policy is the parsed rule set.
 type Policy struct {
@@ -136,12 +180,14 @@ func Parse(data []byte) (*Policy, error) {
 	if p.Version != Version {
 		return nil, fmt.Errorf("policy: format version %d, this build understands %d", p.Version, Version)
 	}
-	switch p.Mode {
-	case "":
+	if p.Mode == "" {
 		p.Mode = Observe
-	case Observe, Enforce:
-	default:
-		return nil, fmt.Errorf("policy: unknown mode %q", p.Mode)
+	} else {
+		mode, err := ParseMode(string(p.Mode))
+		if err != nil {
+			return nil, err
+		}
+		p.Mode = mode
 	}
 	for _, a := range []Action{p.Exec.Action, p.Exec.ActionIfTainted} {
 		switch a {
@@ -220,12 +266,18 @@ func (p *Policy) IsTaintSource(tool string) bool {
 func (p *Policy) Decide(call Call, tainted bool) Verdict {
 	v := Verdict{Action: Allow}
 
+	// fromExec tracks who owns the current verdict, so a path of equal severity
+	// can take the attribution away from the exec class. "exec:run_*" is the
+	// least actionable thing to tell someone whose write to package.json was
+	// held; the path is what they need to see. It never changes the decision.
+	fromExec := false
 	if action, rule := p.execAction(call.Tool, tainted); action != "" {
 		v = Verdict{
 			Action: action,
 			Rule:   rule,
 			Reason: fmt.Sprintf("%q runs commands", call.Tool),
 		}
+		fromExec = true
 		if tainted && p.Exec.ActionIfTainted != "" {
 			v.Reason += ", and this session has taken in untrusted content"
 		}
@@ -241,12 +293,23 @@ func (p *Policy) Decide(call Call, tainted bool) Verdict {
 			continue
 		}
 		v.Paths = append(v.Paths, resolved)
-		if hit.action.severity() <= v.Action.severity() {
+
+		stricter := hit.action.severity() > v.Action.severity()
+		// Equal severity displaces the exec class, but never another path: two
+		// path rules of the same weight keep the first, as they always have.
+		takeover := fromExec && hit.action.severity() == v.Action.severity()
+		if !stricter && !takeover {
 			continue
 		}
+
 		v.Action = hit.action
 		v.Rule = hit.rule
-		v.Reason = fmt.Sprintf("%q would touch %s", call.Tool, resolved)
+		if takeover {
+			v.Reason = fmt.Sprintf("%q runs commands, and would touch %s", call.Tool, resolved)
+		} else {
+			v.Reason = fmt.Sprintf("%q would touch %s", call.Tool, resolved)
+		}
+		fromExec = false
 		if hit.tainted {
 			v.Reason += ", and this session has taken in untrusted content"
 		}

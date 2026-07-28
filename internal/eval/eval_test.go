@@ -93,21 +93,36 @@ func TestBlocksPerWeekNeedsTime(t *testing.T) {
 		Last:     time.Unix(0, 0).Add(10 * time.Minute),
 		Verdicts: map[policy.Action]int{policy.Deny: 3},
 	}
-	if _, ok := short.BlocksPerWeek(); ok {
+	if _, ok := short.BlocksPerWeekAt(policy.Enforce); ok {
 		t.Error("a ten-minute window produced a blocks-per-week number")
 	}
+}
 
+// TestBlocksPerWeekIsPerLevel: the difference between the two lines is the
+// entire argument for having levels. Counting confirms at the default level
+// would overstate it by the ratio between them.
+func TestBlocksPerWeekIsPerLevel(t *testing.T) {
 	week := BenignReport{
 		First:    time.Unix(0, 0),
 		Last:     time.Unix(0, 0).Add(7 * 24 * time.Hour),
-		Verdicts: map[policy.Action]int{policy.Deny: 2, policy.Confirm: 3},
+		Verdicts: map[policy.Action]int{policy.Allow: 500, policy.Deny: 2, policy.Confirm: 30},
 	}
-	rate, ok := week.BlocksPerWeek()
+
+	enforce, ok := week.BlocksPerWeekAt(policy.Enforce)
 	if !ok {
 		t.Fatal("a full week produced no rate")
 	}
-	if rate < 4.9 || rate > 5.1 {
-		t.Errorf("rate = %.2f, want about 5", rate)
+	if enforce < 1.9 || enforce > 2.1 {
+		t.Errorf("enforce rate = %.2f, want about 2 (deny only)", enforce)
+	}
+
+	strict, _ := week.BlocksPerWeekAt(policy.Strict)
+	if strict < 31.9 || strict > 32.1 {
+		t.Errorf("strict rate = %.2f, want about 32 (deny plus confirm)", strict)
+	}
+
+	if observe, _ := week.BlocksPerWeekAt(policy.Observe); observe != 0 {
+		t.Errorf("observe rate = %.2f, want 0: it blocks nothing", observe)
 	}
 }
 

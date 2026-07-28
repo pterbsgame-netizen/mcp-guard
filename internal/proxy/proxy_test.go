@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,7 +164,10 @@ func assertLog(t *testing.T, path string, streamBytes int) {
 		t.Fatalf("scan log: %v", err)
 	}
 
-	if want := []string{"start", "exit"}; !equalStrings(events, want) {
+	// enforcement is recorded on every run, including this one where nothing is
+	// configured. A session log that cannot say which semantics were in force
+	// is not evidence of anything.
+	if want := []string{"start", "enforcement", "exit"}; !equalStrings(events, want) {
 		t.Errorf("events = %v, want %v", events, want)
 	}
 	if counts[proxy.DirClientToServer] != 4 {
@@ -394,17 +398,19 @@ func TestEnforceBlocksChangedTool(t *testing.T) {
 
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	var serverErr bytes.Buffer
+	serverErr := &lockedBuffer{}
 
 	opts := proxy.Options{
-		Argv:    []string{self, "-test.run=^TestHelperMCPServer$"},
-		Env:     append(os.Environ(), mcpServerEnv+"="+poisonedDesc),
-		Stdin:   inR,
-		Stdout:  outW,
-		Stderr:  &serverErr,
-		Grace:   5 * time.Second,
-		Lock:    lock,
-		Enforce: true,
+		Argv:   []string{self, "-test.run=^TestHelperMCPServer$"},
+		Env:    append(os.Environ(), mcpServerEnv+"="+poisonedDesc),
+		Stdin:  inR,
+		Stdout: outW,
+		Stderr: serverErr,
+		Grace:  5 * time.Second,
+		Lock:   lock,
+		// A changed tool is deny-class: it blocks at the ordinary level, not
+		// only at strict.
+		Mode: policy.Enforce,
 	}
 
 	done := make(chan struct{})
@@ -473,11 +479,34 @@ func TestEnforceBlocksChangedTool(t *testing.T) {
 
 // driver drives a proxied session over pipes, so the test can wait for each
 // answer before sending the next request.
+// lockedBuffer is a bytes.Buffer safe to read while it is being written.
+//
+// Two writers share the proxy's stderr: os/exec's copier goroutine, relaying
+// the child's output, and the proxy's own notices. In production both go to an
+// *os.File and the child writes to the descriptor directly, so nothing races.
+// In a test they meet in one Go buffer, and -race says so.
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
 type driver struct {
 	t         *testing.T
 	in        *io.PipeWriter
 	rd        *bufio.Reader
-	serverErr *bytes.Buffer
+	serverErr *lockedBuffer
 	done      chan struct{}
 }
 
@@ -489,7 +518,7 @@ func drive(t *testing.T, opts proxy.Options) *driver {
 	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
-	serverErr := &bytes.Buffer{}
+	serverErr := &lockedBuffer{}
 
 	opts.Argv = []string{self, "-test.run=^TestHelperMCPServer$"}
 	if opts.Env == nil {
@@ -551,7 +580,7 @@ func jsonPath(p string) string {
 
 // TestPolicyBlocksTheWrite is the stage-3 acceptance criterion. CurXecute is
 // stopped because a call tried to write to the file that decides which servers
-// run вЂ” not because anything recognised an instruction in the message that
+// run - not because anything recognised an instruction in the message that
 // produced the call. There is no text to recognise here at all.
 func TestPolicyBlocksTheWrite(t *testing.T) {
 	home, err := os.UserHomeDir()
@@ -560,7 +589,7 @@ func TestPolicyBlocksTheWrite(t *testing.T) {
 	}
 	target := filepath.Join(home, ".cursor", "mcp.json")
 
-	d := drive(t, proxy.Options{Policy: policy.Default(), Enforce: true})
+	d := drive(t, proxy.Options{Policy: policy.Default(), Mode: policy.Enforce})
 	d.handshake()
 
 	d.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"write_file",` +
@@ -594,20 +623,21 @@ func TestPolicyBlocksTheWrite(t *testing.T) {
 	}
 }
 
-// TestTaintEscalation: the same call, decided differently because of what the
-// session swallowed beforehand. Nothing about the call itself changed, and no
-// classifier looked at any text.
-func TestTaintEscalation(t *testing.T) {
+// taintThenWrite drives a session that pulls in untrusted content and then
+// writes a shell script, which the default policy rates confirm once tainted.
+// It returns the answer to that final write.
+func taintThenWrite(t *testing.T, mode policy.Mode) (*driver, mcp.Message) {
+	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Skipf("no home directory: %v", err)
 	}
 	script := jsonPath(filepath.Join(home, "dev", "build.sh"))
 
-	d := drive(t, proxy.Options{Policy: policy.Default(), Enforce: true})
+	d := drive(t, proxy.Options{Policy: policy.Default(), Mode: mode})
 	d.handshake()
 
-	// Clean session: allowed.
+	// Clean session: nothing to say about this write.
 	d.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"write_file",` +
 		`"arguments":{"path":` + script + `,"content":"echo hi"}}}`)
 	if m := d.recv(); m.Kind != mcp.KindResponse {
@@ -621,17 +651,48 @@ func TestTaintEscalation(t *testing.T) {
 		t.Fatalf("fetch: answered with %v", m.Kind)
 	}
 
-	// Same write as before, now held.
+	// The same write again. Nothing about the call changed; the session did.
 	d.send(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"write_file",` +
 		`"arguments":{"path":` + script + `,"content":"echo hi"}}}`)
-	m := d.recv()
+	return d, d.recv()
+}
+
+// TestEnforceRelaysConfirm is the point of graduated enforcement. At the
+// ordinary level a confirm is recorded, announced, and let through.
+//
+// Refusing it instead is what makes the tool unusable: the confirm list is
+// package.json, Makefiles and shell scripts, which honest work writes all day.
+// A guard that stops those on the day it is switched on is switched off the
+// same day, and then it guards nothing at all.
+func TestEnforceRelaysConfirm(t *testing.T) {
+	d, m := taintThenWrite(t, policy.Enforce)
+	if m.Kind != mcp.KindResponse {
+		t.Fatalf("the write was answered with %v (%+v), want it relayed", m.Kind, m.Error)
+	}
+	d.close()
+
+	// The server really did see it, and the verdict was really recorded.
+	if strings.Count(d.serverErr.String(), callMarker) != 3 {
+		t.Errorf("the server should have seen all three calls, saw:\n%s", d.serverErr.String())
+	}
+	if !strings.Contains(d.serverErr.String(), "allowed but noted") {
+		t.Errorf("nothing was said about the relayed confirm:\n%s", d.serverErr.String())
+	}
+}
+
+// TestStrictBlocksConfirm is the opt-in half: same session, stricter level.
+func TestStrictBlocksConfirm(t *testing.T) {
+	d, m := taintThenWrite(t, policy.Strict)
 	if m.Kind != mcp.KindError {
-		t.Fatalf("tainted session: answered with %v, want the write to be held", m.Kind)
+		t.Fatalf("tainted session at strict: answered with %v, want the write held", m.Kind)
 	}
 	if !strings.Contains(m.Error.Message, "untrusted") {
 		t.Errorf("the refusal does not explain what changed: %q", m.Error.Message)
 	}
 	d.close()
+	if strings.Count(d.serverErr.String(), callMarker) != 2 {
+		t.Errorf("the held call still reached the server:\n%s", d.serverErr.String())
+	}
 }
 
 // TestObserveModeLetsItThrough is the default, and the reason anyone keeps the
@@ -691,7 +752,7 @@ func TestObserveModeLetsItThrough(t *testing.T) {
 // This is the half of the stage-3 criterion that decides whether the tool
 // survives: catching CurXecute is worth nothing if ordinary work also trips.
 // It is skipped unless MCPGUARD_CORPUS points at a log, and it reports how many
-// calls it actually judged — a corpus with no tool calls in it proves nothing,
+// calls it actually judged вЂ” a corpus with no tool calls in it proves nothing,
 // and saying so is the point.
 func TestCorpusPolicy(t *testing.T) {
 	path := os.Getenv("MCPGUARD_CORPUS")

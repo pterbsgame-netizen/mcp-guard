@@ -3,8 +3,9 @@
 // and the server without touching a single byte, recording the session and
 // tracking protocol state as it goes.
 //
-// Through stage 1 it still blocks nothing. Parsing happens beside the traffic,
-// never in its way: a frame the parser cannot understand is relayed anyway.
+// What it refuses depends on Options.Mode, which observes by default. Parsing
+// happens beside the traffic rather than in its way: a frame the parser cannot
+// understand is relayed anyway.
 package proxy
 
 import (
@@ -68,10 +69,15 @@ type Options struct {
 	// the policy stricter about effects.
 	Detect *detect.Ruleset
 
-	// Enforce turns a mismatch into a refused call. The default is to record
-	// it and let it through: a tool that breaks someone's workflow the day it
-	// is installed gets uninstalled the day it is installed.
-	Enforce bool
+	// Mode is which verdicts are acted on. The zero value observes: it records
+	// what would have happened and changes nothing, which is the only reason a
+	// tool like this survives its first week on someone's machine.
+	Mode policy.Mode
+
+	// Provenance is recorded in the session log so a session says which
+	// semantics were in force. Nothing reads it back; a log that cannot say
+	// how it was configured is not evidence of anything.
+	Provenance map[string]any
 
 	// Stdin/Stdout/Stderr default to the process's own. Overridden in tests.
 	Stdin  io.Reader
@@ -88,6 +94,9 @@ func (o *Options) setDefaults() {
 	}
 	if o.SweepEvery <= 0 {
 		o.SweepEvery = 30 * time.Second
+	}
+	if o.Mode == "" {
+		o.Mode = policy.Observe
 	}
 	if o.Stdin == nil {
 		o.Stdin = os.Stdin
@@ -141,11 +150,28 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	}
 	o.Log.Event("start", map[string]any{"argv": o.Argv, "pid": cmd.Process.Pid})
 
-	g := newGuard(&o)
-	observe := o.observer(session, corr, g)
 	// Everything the client receives goes through one writer, from either
-	// goroutine, so messages cannot interleave.
+	// goroutine, so messages cannot interleave. Our own stderr notices share a
+	// writer for the same reason.
 	toClient := &syncWriter{w: o.Stdout}
+	notices := &syncWriter{w: o.Stderr}
+	notice := func(format string, args ...any) {
+		fmt.Fprintf(notices, "mcp-guard: "+format+"\n", args...)
+	}
+
+	g := newGuard(&o, session, notice)
+	observe := o.observer(session, corr, g)
+
+	o.Log.Event("enforcement", enforcementFields(&o))
+	if o.Mode.Enforcing() {
+		notice("enforcing (%s): deny is refused%s", o.Mode,
+			map[bool]string{true: ", confirm too", false: ", confirm is relayed and noted"}[o.Mode == policy.Strict])
+		if o.Lock == nil && o.Policy == nil {
+			// Otherwise this is a silent false sense of security: the switch is
+			// on and there is nothing behind it.
+			notice("warning: enforcing with neither --lock nor --policy: nothing to enforce")
+		}
+	}
 
 	// server -> client
 	s2cDone := make(chan struct{})
@@ -167,7 +193,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		_ = serverIn.Close()
 	}()
 
-	sweepDone := o.startSweeper(corr)
+	sweepDone := o.startSweeper(corr, g)
 	defer close(sweepDone)
 
 	waitc := make(chan error, 1)
@@ -185,6 +211,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	res.ExitCode = code
 
 	client, server := session.Peers()
+	blocked, relayed := g.counts()
 	o.Log.Event("exit", map[string]any{
 		"code":      code,
 		"protocol":  session.ProtocolVersion(),
@@ -193,13 +220,31 @@ func Run(ctx context.Context, o Options) (Result, error) {
 		"tools":     len(session.Tools()),
 		"calls":     len(session.Calls()),
 		"in_flight": corr.InFlight(),
+		"blocked":   blocked,
+		"noted":     relayed,
+		"mode":      string(o.Mode),
 	})
 	return res, err
 }
 
+// enforcementFields describes the level in force and where it came from, so a
+// recorded session is self-describing.
+func enforcementFields(o *Options) map[string]any {
+	fields := map[string]any{
+		"level":  string(o.Mode),
+		"lock":   o.Lock != nil,
+		"policy": o.Policy != nil,
+		"rules":  o.Detect != nil,
+	}
+	for k, v := range o.Provenance {
+		fields[k] = v
+	}
+	return fields
+}
+
 // startSweeper expires unanswered requests in the background. Without it the
 // correlator grows for the whole session every time a server drops a reply.
-func (o *Options) startSweeper(corr *mcp.Correlator) chan struct{} {
+func (o *Options) startSweeper(corr *mcp.Correlator, g *guard) chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		t := time.NewTicker(o.SweepEvery)
@@ -207,6 +252,10 @@ func (o *Options) startSweeper(corr *mcp.Correlator) chan struct{} {
 		for {
 			select {
 			case <-t.C:
+				// The guard keeps its own map of which call is waiting on which
+				// answer, and it leaks by exactly the same mechanism. No event:
+				// the correlator's "unanswered" already covers these calls.
+				g.expire(o.CallTTL)
 				for _, p := range corr.Expire() {
 					o.Log.Event("unanswered", map[string]any{
 						"dir":    string(p.Dir),
@@ -263,10 +312,13 @@ func (o *Options) observer(session *mcp.Session, corr *mcp.Correlator, g *guard)
 				}
 				session.Observe(dir, m, &p)
 				g.answered(dir, m)
-				if p.Method == "tools/list" {
+				switch p.Method {
+				case "tools/list":
 					// The advertised set just changed or was stated for the
 					// first time; this is the only moment we can check it.
 					g.verifyTools(session)
+				case "initialize":
+					g.handshakeDone()
 				}
 
 			default:
@@ -332,6 +384,10 @@ func (o *Options) pump(dir mcp.Direction, src io.Reader, dst io.Writer, deny fun
 					// Refused: the server never sees this, and the sender gets
 					// an answer rather than silence.
 					if _, werr := back.Write(reply); werr != nil {
+						// back is our own stdout, so a failed write means the
+						// client is already gone. Returning is right; the event
+						// is so the transcript explains why this stopped.
+						o.Log.Event("client-write-failed", map[string]any{"err": werr.Error()})
 						return
 					}
 					refused = true

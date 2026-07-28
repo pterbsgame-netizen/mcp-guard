@@ -204,7 +204,13 @@ func printMessage(w io.Writer, s *section, rec record) {
 			}
 			verdict := "result"
 			if m.Kind == mcp.KindError {
-				verdict = fmt.Sprintf("error %d %q", m.Error.Code, m.Error.Message)
+				// A refusal we wrote ourselves is not the server failing, and a
+				// transcript that reads them the same way hides which is which.
+				if m.Error.Code == mcp.CodeBlocked {
+					verdict = fmt.Sprintf("BLOCKED %q", m.Error.Message)
+				} else {
+					verdict = fmt.Sprintf("error %d %q", m.Error.Code, m.Error.Message)
+				}
 			}
 			fmt.Fprintf(w, "%s%s <- %s  id=%s%s\n", prefix, verdict, label, m.ID, took)
 			if ok {
@@ -262,9 +268,10 @@ func printSummary(w io.Writer, s *section) {
 		return
 	}
 	client, server := s.sess.Peers()
+	clientCaps, serverCaps := s.sess.Capabilities()
 	calls := s.sess.Calls()
 
-	var failed, unfinished int
+	var failed, unfinished, blocked int
 	byTool := map[string]int{}
 	for _, c := range calls {
 		byTool[c.Tool]++
@@ -274,15 +281,25 @@ func printSummary(w io.Writer, s *section) {
 		if !c.Done {
 			unfinished++
 		}
+		if c.Blocked {
+			blocked++
+		}
 	}
 
 	fmt.Fprintf(w, "  --\n")
 	if v := s.sess.ProtocolVersion(); v != "" {
 		fmt.Fprintf(w, "  protocol %s   client %s   server %s\n", v, name(client), name(server))
 	}
+	if len(clientCaps.Names) > 0 || len(serverCaps.Names) > 0 {
+		fmt.Fprintf(w, "  capabilities: client [%s]   server [%s]\n",
+			strings.Join(clientCaps.Names, " "), strings.Join(serverCaps.Names, " "))
+	}
 	fmt.Fprintf(w, "  %d tools advertised, %d calls", len(s.sess.Tools()), len(calls))
-	if failed > 0 {
-		fmt.Fprintf(w, ", %d failed", failed)
+	if blocked > 0 {
+		fmt.Fprintf(w, ", %d blocked by mcp-guard", blocked)
+	}
+	if failed > blocked {
+		fmt.Fprintf(w, ", %d failed", failed-blocked)
 	}
 	if unfinished > 0 {
 		fmt.Fprintf(w, ", %d never answered", unfinished)

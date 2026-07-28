@@ -6,6 +6,14 @@
 // C:\Users\ME~1\.ssh\id_rsa, \\?\C:\Users\me\.ssh\id_rsa and a symlink pointing
 // at the same file all reach the filesystem while none of them match the rule.
 // Comparison must happen after resolution, never before.
+//
+// Known gap: Unicode normalisation. macOS stores filenames decomposed (NFD),
+// so a rule written with a composed "é" will not match a path the filesystem
+// reports decomposed, and the reverse on Linux. Closing it means depending on
+// golang.org/x/text, which is a large dependency for a case that only arises
+// with non-ASCII path components; it was left out deliberately rather than
+// overlooked. Anyone protecting such a path on macOS should know it is not
+// covered.
 package fspath
 
 import (

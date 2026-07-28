@@ -407,7 +407,8 @@ func runProxy() int {
 	maxLog := flag.Int64("log-max-bytes", proxy.DefaultMaxLogBytes, "rotate the session log past this size; 0 disables rotation")
 	callTTL := flag.Duration("call-ttl", 5*time.Minute, "how long an unanswered request is remembered before it is written off")
 	lockPath := flag.String("lock", "", "check the server against this lock file (see: mcp-guard approve)")
-	enforce := flag.Bool("enforce", false, "act on verdicts instead of only recording them")
+	var enforce enforceFlag
+	flag.Var(&enforce, "enforce", "enforcement level: observe, enforce (deny only) or strict (confirm too); bare -enforce means enforce")
 	policyPath := flag.String("policy", "", `policy file; "default" uses the built-in one`)
 	rulesPath := flag.String("rules", "", "content signature file; defaults to the built-in set when a policy is in use")
 	flag.Usage = func() {
@@ -421,6 +422,19 @@ func runProxy() int {
 		flag.Usage()
 		return 2
 	}
+	if misparsedEnforce(argv) {
+		fmt.Fprintf(os.Stderr, "mcp-guard: -enforce takes its value with an equals sign: -enforce=%s\n", argv[0])
+		return 2
+	}
+
+	// The kill switch is checked before any configuration file is opened. That
+	// is the whole point: a broken policy or lock is otherwise a refusal to
+	// start, which is exactly the situation this has to survive.
+	disabled := off(os.Getenv)
+	if disabled {
+		fmt.Fprintln(os.Stderr,
+			"mcp-guard: "+killSwitch+" is set: relaying with no checks at all - no pin check, no policy, no content scan")
+	}
 
 	open := func() (*proxy.SessionLog, error) {
 		if *logPath != "" {
@@ -431,9 +445,15 @@ func runProxy() int {
 	log, err := open()
 	switch {
 	case errors.Is(err, proxy.ErrNotSecured):
-		// Worth saying out loud Р Р†Р вЂљРІР‚Сњ the log holds every tool result verbatim Р Р†Р вЂљРІР‚Сњ
+		// Worth saying out loud - the log holds every tool result verbatim -
 		// but not worth refusing to start and breaking the client's server.
 		fmt.Fprintf(os.Stderr, "mcp-guard: warning: %v\n", err)
+	case err != nil && disabled:
+		// Under the kill switch nothing is allowed to stop the start. The log
+		// is still worth keeping when it can be kept, since losing the record
+		// of the session the guard misbehaved in is the opposite of useful.
+		fmt.Fprintf(os.Stderr, "mcp-guard: warning: no session log: %v\n", err)
+		log = nil
 	case err != nil:
 		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
 		return 1
@@ -444,12 +464,12 @@ func runProxy() int {
 	defer stop()
 
 	var lock *pin.Lock
-	if *lockPath != "" {
+	if *lockPath != "" && !disabled {
 		lock, err = pin.Load(*lockPath)
 		if err != nil {
 			// A lock that cannot be read is a refusal to start: the user asked
 			// for this server to be checked, and starting unchecked would be
-			// worse than not starting.
+			// worse than not starting. MCPGUARD_OFF is the way out.
 			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
 			return 1
 		}
@@ -457,6 +477,7 @@ func runProxy() int {
 
 	var rules *policy.Policy
 	switch {
+	case disabled:
 	case *policyPath == "default":
 		rules = policy.Default()
 	case *policyPath != "":
@@ -473,6 +494,7 @@ func runProxy() int {
 	// taint level, and taint is something only the policy acts on.
 	var signatures *detect.Ruleset
 	switch {
+	case disabled:
 	case *rulesPath != "":
 		signatures, err = detect.Load(*rulesPath)
 		if err != nil {
@@ -483,15 +505,21 @@ func runProxy() int {
 		signatures = detect.Default()
 	}
 
+	mode, from := resolveMode(&enforce, rules)
+	if disabled {
+		mode, from = policy.Observe, "off"
+	}
+
 	res, runErr := proxy.Run(ctx, proxy.Options{
-		Argv:    argv,
-		Log:     log,
-		Grace:   *grace,
-		CallTTL: *callTTL,
-		Lock:    lock,
-		Policy:  rules,
-		Detect:  signatures,
-		Enforce: *enforce,
+		Argv:       argv,
+		Log:        log,
+		Grace:      *grace,
+		CallTTL:    *callTTL,
+		Lock:       lock,
+		Policy:     rules,
+		Detect:     signatures,
+		Mode:       mode,
+		Provenance: map[string]any{"from": from},
 	})
 	if runErr != nil {
 		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", runErr)
@@ -501,6 +529,81 @@ func runProxy() int {
 	}
 	// Exit with the server's code: to the client we must look like the server.
 	return res.ExitCode
+}
+
+// killSwitch turns the proxy into a pure pass-through.
+//
+// It exists because every other failure here is a refusal to start, and a
+// refusal to start means the MCP server simply does not appear in the client,
+// with the reason only on stderr. One environment variable gets the tools back
+// without editing a config or rebuilding anything.
+const killSwitch = "MCPGUARD_OFF"
+
+// off reports whether the kill switch is set.
+//
+// Only affirmative values count. MCPGUARD_OFF=0 leaving the guard disabled is
+// the mistake everyone makes with a variable named like this.
+func off(getenv func(string) string) bool {
+	switch strings.ToLower(strings.TrimSpace(getenv(killSwitch))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+// enforceFlag accepts a bare -enforce as well as -enforce=strict.
+//
+// The flag package special-cases a Value that reports IsBoolFlag, which is what
+// keeps the old spelling working while adding levels.
+type enforceFlag struct {
+	mode policy.Mode
+	set  bool
+}
+
+func (e *enforceFlag) String() string {
+	if e == nil || !e.set {
+		return string(policy.Observe)
+	}
+	return string(e.mode)
+}
+
+func (e *enforceFlag) Set(s string) error {
+	mode, err := policy.ParseMode(s)
+	if err != nil {
+		return err
+	}
+	e.mode, e.set = mode, true
+	return nil
+}
+
+// IsBoolFlag is what allows `-enforce` with no value.
+func (e *enforceFlag) IsBoolFlag() bool { return true }
+
+// resolveMode decides the level in force and where it came from.
+//
+// The command line wins over the file. The policy file is meant to be committed
+// and may belong to somebody else, while whoever is unbreaking this at nine in
+// the morning owns the client config — so the flag has to be able to turn
+// enforcement down, not only up.
+func resolveMode(f *enforceFlag, p *policy.Policy) (policy.Mode, string) {
+	switch {
+	case f != nil && f.set:
+		return f.mode, "flag"
+	case p != nil && p.Mode != "":
+		return p.Mode, "policy"
+	}
+	return policy.Observe, "default"
+}
+
+// misparsedEnforce catches `-enforce strict`, which the flag package reads as a
+// bare -enforce followed by a positional argument. Here the positionals are the
+// server command, so it would silently launch a server called "strict".
+func misparsedEnforce(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	_, err := policy.ParseMode(args[0])
+	return err == nil
 }
 
 func defaultLogDir() string {

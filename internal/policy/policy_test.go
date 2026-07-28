@@ -222,7 +222,7 @@ func TestPathsFoundAnywhereInArguments(t *testing.T) {
 func TestRelativePathsMatchUnanchoredRules(t *testing.T) {
 	p := Default()
 	// The server's working directory is its own business and we do not know
-	// it, so an anchored rule cannot apply вЂ” but "a file called .env, wherever
+	// it, so an anchored rule cannot apply - but "a file called .env, wherever
 	// it is" still can.
 	v := p.Decide(Call{
 		Tool: "read_text_file",

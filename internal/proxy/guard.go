@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
 	"github.com/pterbsgame-netizen/mcp-guard/internal/normalize"
@@ -13,11 +14,11 @@ import (
 	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
 )
 
-// syncWriter serialises writes to the client.
+// syncWriter serialises writes to a stream with more than one writer.
 //
-// Two goroutines write there: the one relaying the server's answers, and the
-// one that refuses a call and answers it itself. Without this they can
-// interleave mid-message, and a torn line is not JSON any more.
+// The client receives messages from two goroutines: the one relaying the
+// server's answers, and the one that refuses a call and answers it itself.
+// Without this they can interleave mid-message, and a torn line is not JSON.
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -29,40 +30,82 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
+// pendingCall is a tools/call waiting for its answer, remembered so the answer
+// can be attributed back to the tool that produced it.
+type pendingCall struct {
+	tool string
+	at   time.Time
+}
+
 // guard holds everything the proxy knows that bears on a decision: which tools
 // stopped matching their approval, whether the session has taken in untrusted
 // content, and which call is waiting on which answer.
 type guard struct {
-	o *Options
+	o       *Options
+	session *mcp.Session
+	notice  func(string, ...any)
+	now     func() time.Time
 
-	mu sync.Mutex
-	// mismatched maps a tool name to why it no longer matches the lock.
-	mismatched map[string]string
-	// pendingTools maps a correlation key to the tool a call is waiting on, so
-	// the answer can be attributed when it arrives.
-	pendingTools map[string]string
+	mu           sync.Mutex
+	mismatched   map[string]string
+	verifyErr    string
+	pendingTools map[string]pendingCall
 	tainted      bool
+	announced    map[string]bool
+	blocked      int
+	relayed      int
 }
 
-func newGuard(o *Options) *guard {
-	return &guard{o: o, pendingTools: make(map[string]string)}
-}
-
-// enforcing reports whether verdicts are acted on rather than only recorded.
-//
-// Either switch turns it on: --enforce on the command line, or mode: enforce in
-// the policy file. Observe is the default in both, deliberately.
-func (g *guard) enforcing() bool {
-	if g.o.Enforce {
-		return true
+func newGuard(o *Options, session *mcp.Session, notice func(string, ...any)) *guard {
+	return &guard{
+		o:            o,
+		session:      session,
+		notice:       notice,
+		now:          time.Now,
+		pendingTools: make(map[string]pendingCall),
+		announced:    make(map[string]bool),
 	}
-	return g.o.Policy != nil && g.o.Policy.Mode == policy.Enforce
 }
+
+// blocks reports whether an action is refused at the level in force.
+func (g *guard) blocks(a policy.Action) bool { return g.o.Mode.Blocks(a) }
+
+func (g *guard) enforcing() bool { return g.o.Mode.Enforcing() }
 
 func (g *guard) isTainted() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.tainted
+}
+
+// counts returns how many calls were refused and how many verdicts fired
+// without refusing, for the exit record.
+func (g *guard) counts() (blocked, relayed int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.blocked, g.relayed
+}
+
+// expire drops call attributions older than ttl.
+//
+// Without it the map grows for the whole session on every reply a server never
+// sends — the same leak the correlator has a sweeper for, one map to the side.
+func (g *guard) expire(ttl time.Duration) int {
+	if ttl <= 0 {
+		return 0
+	}
+	cutoff := g.now().Add(-ttl)
+
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var dropped int
+	for key, p := range g.pendingTools {
+		if p.at.Before(cutoff) {
+			delete(g.pendingTools, key)
+			dropped++
+		}
+	}
+	return dropped
 }
 
 // setPinMismatches records the result of checking a tools/list answer.
@@ -80,7 +123,7 @@ func (g *guard) setPinMismatches(changes []pin.Change) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.mismatched = m
+	g.mismatched, g.verifyErr = m, ""
 }
 
 // verifyTools checks the server's currently advertised tools against the lock.
@@ -90,6 +133,13 @@ func (g *guard) verifyTools(session *mcp.Session) {
 	}
 	changes, err := g.o.Lock.Verify(session.Tools())
 	if err != nil {
+		// Leaving the old map in place makes the reasons stale in one
+		// direction and clearing it silently makes them stale in the other.
+		// "This could not be checked" is the only honest third answer, and it
+		// carries a weaker action than "this changed".
+		g.mu.Lock()
+		g.mismatched, g.verifyErr = nil, err.Error()
+		g.mu.Unlock()
 		g.o.Log.Event("pin-error", map[string]any{"err": err.Error()})
 		return
 	}
@@ -103,7 +153,45 @@ func (g *guard) verifyTools(session *mcp.Session) {
 	}
 }
 
-// answered is called when a reply arrives, so a result from a tool that carries
+// pinStatus reports why a call should not be trusted against the lock, and how
+// strong the signal is.
+//
+// A tool that changed since approval is a deny: it fires only when something
+// actually moved, it is precise, and the refusal names the cure. A tool that
+// could not be checked at all is a confirm: "we do not know" is a much weaker
+// claim than "it changed", and under enforcement its blast radius would be the
+// whole server dying over one malformed schema.
+func (g *guard) pinStatus(tool string) (reason string, action policy.Action, bad bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if r, ok := g.mismatched[tool]; ok {
+		return r, policy.Deny, true
+	}
+	if g.verifyErr != "" {
+		return "the approved tool list could not be checked: " + g.verifyErr, policy.Confirm, true
+	}
+	return "", "", false
+}
+
+// handshakeDone records what each side said it could do.
+//
+// Nothing acts on this yet. It is the evidence needed to revisit protocol-native
+// confirmation: elicitation/create can only be used if the client declared it,
+// and today's logs are how that question gets answered with data.
+func (g *guard) handshakeDone() {
+	client, server := g.session.Capabilities()
+	clientName, serverName := g.session.Peers()
+	g.o.Log.Event("handshake", map[string]any{
+		"protocol":            g.session.ProtocolVersion(),
+		"client":              clientName.Name,
+		"server":              serverName.Name,
+		"client_capabilities": client.Names,
+		"server_capabilities": server.Names,
+		"elicitation":         g.session.ClientSupports("elicitation"),
+	})
+}
+
+// answered is called when a reply arrives, so a result from a tool carrying
 // content from somewhere untrusted can taint the session.
 //
 // Taint is decided by where the content came from, not by what it says. An
@@ -116,10 +204,10 @@ func (g *guard) answered(dir mcp.Direction, m mcp.Message) {
 	key := string(dir.Opposite()) + "\x00" + m.ID.Key()
 
 	g.mu.Lock()
-	tool, ok := g.pendingTools[key]
+	pending, ok := g.pendingTools[key]
 	delete(g.pendingTools, key)
 	alreadyTainted := g.tainted
-	bySource := ok && g.o.Policy.IsTaintSource(tool)
+	bySource := ok && g.o.Policy.IsTaintSource(pending.tool)
 	if bySource {
 		g.tainted = true
 	}
@@ -128,6 +216,7 @@ func (g *guard) answered(dir mcp.Direction, m mcp.Message) {
 	if !ok {
 		return
 	}
+	tool := pending.tool
 	if bySource && !alreadyTainted {
 		g.o.Log.Event("tainted", map[string]any{
 			"by":     tool,
@@ -173,6 +262,204 @@ func (g *guard) answered(dir mcp.Direction, m mcp.Message) {
 	})
 }
 
+// gateResult is what the gate concluded about one message.
+type gateResult struct {
+	refuse bool
+	reason string
+	// tool is set for a tools/call that is being let through, so the caller can
+	// remember it once the whole frame has been judged.
+	tool string
+}
+
+// gate decides whether a client-to-server frame should be refused, returning
+// the reply to send back instead, or nil to let it through.
+//
+// Only tools/call is judged. Letting tools/list through is a deliberate trade:
+// refusing it leaves the client with no tools and a visibly broken server,
+// while the thing that does damage is the call.
+func (g *guard) gate(frame []byte) []byte {
+	if g.o.Lock == nil && g.o.Policy == nil {
+		return nil
+	}
+	msgs, batched, err := mcp.ParseFrame(frame)
+	if err != nil || len(msgs) == 0 {
+		// Transparency wins over judgement here; the observer already records
+		// the frame as unparseable.
+		return nil
+	}
+
+	if !batched {
+		res := g.inspect(msgs[0])
+		if res.refuse {
+			return g.refuse(msgs[0], res.reason)
+		}
+		if res.tool != "" {
+			g.remember(msgs[0].ID, res.tool)
+		}
+		return nil
+	}
+
+	// A batch is judged whole, and nothing is recorded until every member has
+	// been. Removing one member would leave a hole in the server's reply array
+	// where the client is still waiting on an id, and stitching a synthetic
+	// error into that reply is a whole rewriting machine for a protocol feature
+	// dropped in revision 2025-06-18. Refusing the batch is well-formed.
+	var refusal string
+	results := make([]gateResult, 0, len(msgs))
+	for _, m := range msgs {
+		res := g.inspect(m)
+		results = append(results, res)
+		if res.refuse && refusal == "" {
+			refusal = res.reason
+		}
+	}
+	g.o.Log.Event("gate-batch", map[string]any{
+		"messages": len(msgs),
+		"refused":  refusal != "",
+	})
+	if refusal != "" {
+		return g.refuseBatch(msgs, refusal)
+	}
+	for i, m := range msgs {
+		if results[i].tool != "" {
+			g.remember(m.ID, results[i].tool)
+		}
+	}
+	return nil
+}
+
+// inspect judges one message. It records the verdict but never touches
+// pendingTools: in a batch nothing may be remembered until the whole frame has
+// been decided.
+func (g *guard) inspect(m mcp.Message) gateResult {
+	if m.Kind != mcp.KindRequest || m.Method != "tools/call" {
+		return gateResult{}
+	}
+	var params struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if json.Unmarshal(m.Params, &params) != nil || params.Name == "" {
+		return gateResult{}
+	}
+
+	if reason, action, bad := g.pinStatus(params.Name); bad {
+		blocked := g.blocks(action)
+		g.o.Log.Event("pin-violation", map[string]any{
+			"tool":    params.Name,
+			"id":      m.ID.String(),
+			"action":  string(action),
+			"reason":  reason,
+			"mode":    string(g.o.Mode),
+			"blocked": blocked,
+		})
+		if blocked {
+			g.countBlocked()
+			return gateResult{refuse: true,
+				reason: reason + ". Review it with: mcp-guard approve --diff -- <server command>"}
+		}
+		g.announce(params.Name, "pin", reason)
+	}
+
+	if g.o.Policy == nil {
+		return gateResult{tool: params.Name}
+	}
+	v := g.o.Policy.Decide(policy.Call{Tool: params.Name, Args: params.Arguments}, g.isTainted())
+	if v.Action == policy.Allow {
+		return gateResult{tool: params.Name}
+	}
+
+	blocked := g.blocks(v.Action)
+	g.o.Log.Event("policy-verdict", map[string]any{
+		"tool":    params.Name,
+		"id":      m.ID.String(),
+		"action":  string(v.Action),
+		"rule":    v.Rule,
+		"paths":   v.Paths,
+		"tainted": g.isTainted(),
+		"mode":    string(g.o.Mode),
+		"blocked": blocked,
+	})
+	if !blocked {
+		g.announce(params.Name, v.Rule, v.Reason)
+		return gateResult{tool: params.Name}
+	}
+	g.countBlocked()
+
+	switch v.Action {
+	case policy.Deny:
+		return gateResult{refuse: true,
+			reason: fmt.Sprintf("blocked by mcp-guard: %s (rule %q)", v.Reason, v.Rule)}
+	default:
+		return gateResult{refuse: true, reason: fmt.Sprintf(
+			"held by mcp-guard for confirmation: %s (rule %q). "+
+				"There is no way to ask you from here, so it was refused. "+
+				"Allow it with a policy rule, or drop back to -enforce (deny only).",
+			v.Reason, v.Rule)}
+	}
+}
+
+// announce says on stderr that a verdict fired without stopping anything.
+//
+// Once per (tool, rule) per session. A log file read later is honest but not
+// loud, and unbounded stderr is how a tool gets uninstalled; one line the first
+// time a rule fires is the balance. Silent in observe mode, where everything is
+// relayed and the notice would fire from the first minute.
+func (g *guard) announce(tool, rule, reason string) {
+	if !g.enforcing() || g.notice == nil {
+		return
+	}
+	key := tool + "\x00" + rule
+	g.mu.Lock()
+	g.relayed++
+	first := !g.announced[key]
+	g.announced[key] = true
+	g.mu.Unlock()
+	if first {
+		g.notice("allowed but noted: %s (rule %q)", reason, rule)
+	}
+}
+
+func (g *guard) countBlocked() {
+	g.mu.Lock()
+	g.blocked++
+	g.mu.Unlock()
+}
+
+func (g *guard) remember(id mcp.ID, tool string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.pendingTools[string(mcp.ClientToServer)+"\x00"+id.Key()] = pendingCall{tool: tool, at: g.now()}
+}
+
+// refuse builds the reply that goes back instead of the result, and records it.
+//
+// A blocked call must still be answered, with the same id. Dropping it leaves
+// the client waiting until it times out, with nothing to show for it and no
+// idea why. The log entry is written before the reply goes out, so if the write
+// then fails the record says "refused, and the client never got it".
+func (g *guard) refuse(m mcp.Message, reason string) []byte {
+	reply := mcp.NewError(m.ID, mcp.CodeBlocked, reason)
+	g.o.Log.Record(string(mcp.ServerToClient), reply)
+	g.session.ObserveRefusal(mcp.ClientToServer, m, reason)
+	return reply
+}
+
+func (g *guard) refuseBatch(msgs []mcp.Message, reason string) []byte {
+	ids := make([]mcp.ID, 0, len(msgs))
+	for _, m := range msgs {
+		if m.Kind == mcp.KindRequest {
+			ids = append(ids, m.ID)
+			g.session.ObserveRefusal(mcp.ClientToServer, m, reason)
+		}
+	}
+	reply := mcp.NewErrorBatch(ids, mcp.CodeBlocked, reason)
+	if reply != nil {
+		g.o.Log.Record(string(mcp.ServerToClient), reply)
+	}
+	return reply
+}
+
 // resultText pulls the human-readable strings out of a tool result.
 //
 // Bounded twice over: the walk stops early, and the detector truncates again.
@@ -212,104 +499,3 @@ func collectText(v any, depth int, b *strings.Builder) {
 
 // normalizeBudget matches what the normaliser will look at anyway.
 const normalizeBudget = normalize.MaxInput
-
-// gate decides whether a client-to-server frame should be refused, returning
-// the reply to send back instead, or nil to let it through.
-//
-// Only tools/call is gated. Letting tools/list through is a deliberate trade:
-// refusing it leaves the client with no tools and a visibly broken server,
-// while the thing that does damage is the call.
-func (g *guard) gate(frame []byte) []byte {
-	if g.o.Lock == nil && g.o.Policy == nil {
-		return nil
-	}
-	msgs, batched, err := mcp.ParseFrame(frame)
-	if err != nil || len(msgs) != 1 {
-		if batched {
-			// A batch needs a batched reply to stay well-formed. Rather than
-			// answer badly, let it through and say so.
-			g.o.Log.Event("gate-skipped-batch", nil)
-		}
-		return nil
-	}
-	m := msgs[0]
-	if m.Kind != mcp.KindRequest || m.Method != "tools/call" {
-		return nil
-	}
-	var params struct {
-		Name      string          `json:"name"`
-		Arguments json.RawMessage `json:"arguments"`
-	}
-	if json.Unmarshal(m.Params, &params) != nil || params.Name == "" {
-		return nil
-	}
-
-	g.mu.Lock()
-	g.pendingTools[string(mcp.ClientToServer)+"\x00"+m.ID.Key()] = params.Name
-	reason, mismatched := g.mismatched[params.Name]
-	tainted := g.tainted
-	g.mu.Unlock()
-
-	if mismatched {
-		g.o.Log.Event("pin-violation", map[string]any{
-			"tool":    params.Name,
-			"id":      m.ID.String(),
-			"reason":  reason,
-			"blocked": g.enforcing(),
-		})
-		if g.enforcing() {
-			return g.refuse(m.ID, reason+". Review it with: mcp-guard approve --diff -- <server command>")
-		}
-	}
-
-	if g.o.Policy == nil {
-		return nil
-	}
-	v := g.o.Policy.Decide(policy.Call{Tool: params.Name, Args: params.Arguments}, tainted)
-	if v.Action == policy.Allow {
-		return nil
-	}
-
-	g.o.Log.Event("policy-verdict", map[string]any{
-		"tool":    params.Name,
-		"id":      m.ID.String(),
-		"action":  string(v.Action),
-		"rule":    v.Rule,
-		"paths":   v.Paths,
-		"tainted": tainted,
-		"blocked": g.enforcing(),
-	})
-	if !g.enforcing() {
-		return nil
-	}
-
-	switch v.Action {
-	case policy.Deny:
-		return g.refuse(m.ID, fmt.Sprintf(
-			"blocked by mcp-guard: %s (rule %q)", v.Reason, v.Rule))
-	case policy.Confirm:
-		// There is no way to ask from here. The protocol has elicitation/create
-		// for exactly this, but it needs client support that cannot be assumed,
-		// so a confirm becomes a refusal with instructions rather than a
-		// silent allow. Saying so plainly beats pretending to have asked.
-		return g.refuse(m.ID, fmt.Sprintf(
-			"held by mcp-guard for confirmation: %s (rule %q). "+
-				"There is no way to ask you from here yet, so it was refused. "+
-				"Allow it by adding a rule to the policy file, or rerun without --enforce.",
-			v.Reason, v.Rule))
-	}
-	return nil
-}
-
-// refuse builds the reply that goes back instead of the result.
-//
-// A blocked call must still be answered, with the same id. Dropping it leaves
-// the client waiting until it times out, with nothing to show for it and no
-// idea why.
-func (g *guard) refuse(id mcp.ID, message string) []byte {
-	reply, err := mcp.NewError(id, mcp.CodeBlocked, message)
-	if err != nil {
-		return nil
-	}
-	return reply
-}
