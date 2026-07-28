@@ -24,8 +24,41 @@ bet here is on three differences:
    trying to decide whether a string is "an instruction". Content inspection
    only ever raises a taint level; it never blocks on its own.
 
-> The detailed comparison table goes here, after actually reading the `mcp-scan`
-> proxy source. Claims above are the design intent, not a verified benchmark.
+### How this compares, as of July 2026
+
+`mcp-scan` is now **Snyk Agent Scan** (`snyk-agent-scan`). Reading its README
+changed the picture rather than confirming it, so the differences worth naming
+are not the ones assumed at the start:
+
+| | Snyk Agent Scan | mcp-guard |
+|---|---|---|
+| shape | scanner and inventory | runtime proxy |
+| when it acts | before or between sessions | on every message |
+| account required | Snyk sign-up plus `SNYK_TOKEN` | none |
+| network | reports to Snyk Evo in background mode | never |
+| breadth | 13 agents, MCP servers **and** skills, 15+ issue codes | one transport, three threat classes |
+| enforcement | reports | refuses the call |
+
+The overlap is smaller than it looks. Agent Scan answers "what is installed and
+does any of it look dangerous"; that is inventory across a fleet, and it does it
+across far more surface than this ever will. mcp-guard answers "this specific
+call is about to write to `~/.ssh` — no", which is a different question asked at
+a different moment.
+
+Two things are worth knowing before choosing:
+
+- **Scanning a config executes it.** To read tool descriptions, Agent Scan
+  starts the stdio servers listed in the config; it asks for consent per server
+  and recommends a sandbox for untrusted configs. mcp-guard's `approve` starts a
+  server too, but only the one named on its command line, never a config's worth.
+- **The cloud dependency is now mandatory, not optional.** A token is required
+  before any scan. Being able to run with no account and no network was a guess
+  when this project started; it is now the clearer difference.
+
+Scope note: this is from the README, not from running it — the tool needs a Snyk
+account this machine does not have. What it does at runtime, and whether the
+proxy mode the older `mcp-scan` shipped still exists, is not something reading
+documentation can settle.
 
 ## Design rule
 
