@@ -32,19 +32,24 @@ use**, target under one. Anything that raises it needs to justify itself.
 
 ## Current state, as of 29 July 2026
 
-Stages 0–4 of the plan are done. CI is green on Windows and Linux.
+Stages 0–4 of the plan are done, with two loose ends in stage 3. CI is green on
+Windows and Linux. `ROADMAP.md` tracks every item; check it before assuming
+something is finished.
 
-- Running in **observe** mode on this machine, wrapping two servers:
-  `filesystem` (scoped to `C:\Users\peter\dev`) and `fetch`.
+- Running in **observe** mode on this machine, wrapping all four configured
+  servers: `filesystem` (scoped to `C:\Users\peter\dev`) and `fetch` from
+  `claude_desktop_config.json`, `context7` and `blender` from `~/.claude.json`.
 - **`-enforce` is deliberately off.** Not because it does not work — it is
   tested — but because the false-positive rate has never been measured on real
   traffic. Do not switch it on to "see what happens".
-- The benign corpus is **effectively empty**: ~23 sessions but only 2 tool
-  calls, because a conversation with an agent only reaches the corpus when it
-  goes through those two MCP servers. Built-in file tools bypass the proxy
-  entirely, so a day of heavy editing can leave the corpus at zero.
-  `mcp-guard eval --benign` prints the call count next to the rate for exactly
-  this reason: a zero over two calls is not a rate.
+- The benign corpus is **effectively empty**: 27 sessions but only 2 tool calls.
+  Traffic reaches the corpus only through a wrapped MCP server; built-in file
+  tools bypass the proxy entirely, so a day of heavy editing can leave it at
+  zero. `mcp-guard eval --benign` prints the call count next to the rate for
+  exactly this reason — a zero over two calls is not a rate.
+- `blender` exposes `execute_blender_code`, which is the first tool in this
+  configuration that the policy rates anything other than `allow`: exec class,
+  `confirm` clean and `deny` once tainted. Nothing has exercised that path yet.
 
 ## Build and test
 
