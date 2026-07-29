@@ -57,7 +57,7 @@ func TestBenignReplay(t *testing.T) {
 		t.Fatalf("write log: %v", err)
 	}
 
-	rep, err := Benign(log, detect.Default(), policy.Default())
+	rep, err := Benign(log, detect.Default(), policy.Default(), nil)
 	if err != nil {
 		t.Fatalf("Benign: %v", err)
 	}
@@ -126,6 +126,59 @@ func TestBlocksPerWeekIsPerLevel(t *testing.T) {
 	}
 }
 
+// TestExcludeLeavesProbesOut: deliberately probing the guard writes into the
+// same directory as ordinary work, and one attempt to read ~/.ssh sitting in
+// the benign corpus ruins the number in both directions — it counts as a false
+// positive it is not, and it inflates a rate that is supposed to describe
+// ordinary use. Nothing in a log tells the two apart; only a person knows.
+func TestExcludeLeavesProbesOut(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skipf("no home directory: %v", err)
+	}
+	dir := t.TempDir()
+	ssh := filepath.ToSlash(filepath.Join(home, ".ssh", "id_rsa"))
+	notes := filepath.ToSlash(filepath.Join(home, "dev", "notes.txt"))
+
+	write := func(name, path string) {
+		t.Helper()
+		line := `{"t":"2026-07-29T00:00:00Z","dir":"c2s","msg":{"jsonrpc":"2.0","id":1,` +
+			`"method":"tools/call","params":{"name":"read_text_file","arguments":{"path":"` + path + `"}}}}` + "\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(line), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	write("20260729T000000Z-aaaaaaaa.jsonl", notes)
+	write("20260729T010000Z-9c87b429.jsonl", ssh) // the probe
+
+	full, err := Benign(dir, detect.Default(), policy.Default(), nil)
+	if err != nil {
+		t.Fatalf("Benign: %v", err)
+	}
+	if full.Verdicts[policy.Deny] != 1 {
+		t.Fatalf("without excluding, deny = %d, want 1", full.Verdicts[policy.Deny])
+	}
+
+	// A session id copied straight out of a report has to work as a pattern.
+	clean, err := Benign(dir, detect.Default(), policy.Default(), []string{"9c87b429"})
+	if err != nil {
+		t.Fatalf("Benign: %v", err)
+	}
+	if clean.Verdicts[policy.Deny] != 0 {
+		t.Errorf("the probe still counted: deny = %d", clean.Verdicts[policy.Deny])
+	}
+	if clean.Sessions != 1 || clean.Excluded != 1 {
+		t.Errorf("sessions = %d, excluded = %d; want 1 and 1", clean.Sessions, clean.Excluded)
+	}
+
+	// Dropping input silently would make the number worse, not better.
+	var out bytes.Buffer
+	Report(&out, nil, &clean)
+	if !strings.Contains(out.String(), "excluded by name") {
+		t.Errorf("the report does not admit what it left out:\n%s", out.String())
+	}
+}
+
 // TestEmptyBenignSaysSo: a corpus with no calls must report that it proves
 // nothing, not a confident zero.
 func TestEmptyBenignSaysSo(t *testing.T) {
@@ -134,7 +187,7 @@ func TestEmptyBenignSaysSo(t *testing.T) {
 	if err := os.WriteFile(log, []byte(`{"t":"2026-07-28T00:00:00Z","ev":"start"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	rep, err := Benign(log, detect.Default(), policy.Default())
+	rep, err := Benign(log, detect.Default(), policy.Default(), nil)
 	if err != nil {
 		t.Fatalf("Benign: %v", err)
 	}

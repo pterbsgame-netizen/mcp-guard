@@ -145,6 +145,11 @@ type Exec struct {
 // vouches for: fetched pages, mail, issue trackers, other people's branches.
 type Taint struct {
 	Sources []string `yaml:"sources"`
+
+	// Exclude names tools the source patterns catch by accident. An exclusion
+	// wins over a match, so a broad pattern can stay broad without dragging in
+	// local tools that share a word with a remote one.
+	Exclude []string `yaml:"exclude"`
 }
 
 // Default returns the built-in policy.
@@ -249,6 +254,13 @@ type Verdict struct {
 // IsTaintSource reports whether a tool's results should be treated as content
 // from an untrusted source.
 func (p *Policy) IsTaintSource(tool string) bool {
+	// Exclusions are checked first: a tool named here is local whatever the
+	// source patterns think of its name.
+	for _, pat := range p.Taint.Exclude {
+		if matchName(pat, tool) {
+			return false
+		}
+	}
 	for _, pat := range p.Taint.Sources {
 		if matchName(pat, tool) {
 			return true

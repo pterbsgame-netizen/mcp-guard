@@ -109,3 +109,20 @@ taint:
     - "*linear*"
     - "*notion*"
     - "*read_media_file*"
+
+  # Tools the patterns above catch by accident. An exclusion wins over a match.
+  #
+  # This exists because "*search*" was written for web search and caught
+  # search_files, a local filesystem search that brings in nothing from outside.
+  # Observed on real traffic: one file search tainted the session, and from then
+  # on every write to a shell script or a Makefile escalated to confirm for no
+  # reason. Over-tainting is the expensive mistake — it spends the user's
+  # patience on nothing — so the broad pattern stays and the known-local tools
+  # are named.
+  exclude:
+    - "search_files"
+    - "search_code"
+    - "search_symbols"
+    - "grep*"
+    - "find_files"
+    - "list_directory*"

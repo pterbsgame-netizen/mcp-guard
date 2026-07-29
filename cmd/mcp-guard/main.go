@@ -85,6 +85,7 @@ func runEval(args []string) int {
 	benignPath := fset.String("benign", "", "recorded session log or directory of them")
 	policyPath := fset.String("policy", "default", `policy for the benign side; "default" or a path`)
 	rulesPath := fset.String("rules", "default", `signatures; "default" or a path`)
+	exclude := fset.String("exclude", "", "comma-separated session ids or file globs to leave out of the benign side")
 	fset.Usage = func() { fmt.Fprint(os.Stderr, evalUsage); fset.PrintDefaults() }
 	if err := fset.Parse(args); err != nil {
 		return 2
@@ -122,7 +123,7 @@ func runEval(args []string) int {
 	}
 	var benign *eval.BenignReport
 	if *benignPath != "" {
-		b, err := eval.Benign(*benignPath, rules, rulesForPolicy)
+		b, err := eval.Benign(*benignPath, rules, rulesForPolicy, splitList(*exclude))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
 			return 1

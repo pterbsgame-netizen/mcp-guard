@@ -40,7 +40,13 @@ type AttackReport struct {
 
 // BenignReport is how everything did against real recorded traffic.
 type BenignReport struct {
-	Sessions  int
+	Sessions int
+
+	// Excluded is how many session logs were skipped by name. Reported, never
+	// silent: a measurement that quietly dropped part of its input is not a
+	// measurement.
+	Excluded int
+
 	Results   int
 	Tainting  int
 	RuleHits  map[string]int
@@ -120,7 +126,15 @@ func Attack(dir string, rs *detect.Ruleset) (AttackReport, error) {
 
 // Benign replays recorded sessions: every tool result goes past the signatures,
 // every tool call past the policy.
-func Benign(path string, rs *detect.Ruleset, p *policy.Policy) (BenignReport, error) {
+//
+// exclude drops sessions from the measurement. It exists because probing the
+// guard on purpose writes into the same directory as ordinary work, and a
+// deliberate attempt to read ~/.ssh sitting in the benign corpus turns the one
+// number this project waits on into a lie in both directions: the block counts
+// as a false positive it is not, and the rate it inflates has no meaning.
+// Nothing in a log distinguishes the two — only a human knows which run was
+// which — so it has to be said rather than detected.
+func Benign(path string, rs *detect.Ruleset, p *policy.Policy, exclude []string) (BenignReport, error) {
 	rep := BenignReport{
 		RuleHits:  map[string]int{},
 		Verdicts:  map[policy.Action]int{},
@@ -132,12 +146,34 @@ func Benign(path string, rs *detect.Ruleset, p *policy.Policy) (BenignReport, er
 		return rep, err
 	}
 	for _, log := range logs {
+		if excluded(log, exclude) {
+			rep.Excluded++
+			continue
+		}
 		rep.Sessions++
 		if err := replayLog(log, rs, p, &rep); err != nil {
 			return rep, err
 		}
 	}
 	return rep, nil
+}
+
+// excluded matches a pattern against the log's file name, as a glob or as a
+// plain substring — so a session id copied out of a report works as-is.
+func excluded(path string, patterns []string) bool {
+	base := filepath.Base(path)
+	for _, pat := range patterns {
+		if pat == "" {
+			continue
+		}
+		if strings.Contains(base, pat) {
+			return true
+		}
+		if ok, err := filepath.Match(pat, base); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 func logFiles(path string) ([]string, error) {
@@ -306,6 +342,9 @@ func Report(w io.Writer, attack *AttackReport, benign *BenignReport) {
 	fmt.Fprintln(w, "benign corpus")
 	fmt.Fprintf(w, "  %d session(s), %d tool call(s), %d result(s) scanned\n",
 		benign.Sessions, benign.Calls, benign.Results)
+	if benign.Excluded > 0 {
+		fmt.Fprintf(w, "  %d session(s) excluded by name\n", benign.Excluded)
+	}
 	if span := benign.Span(); span > 0 {
 		fmt.Fprintf(w, "  covering %s\n", span.Round(time.Minute))
 	}

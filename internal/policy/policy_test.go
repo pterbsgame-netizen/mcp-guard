@@ -213,6 +213,31 @@ func TestRealTaintSources(t *testing.T) {
 	}
 }
 
+// TestLocalSearchDoesNotTaint is a regression found on real traffic, not
+// imagined: "*search*" was written for web search and caught search_files, a
+// filesystem search that fetches nothing. One file search tainted the session,
+// and every later write to a shell script escalated to confirm for no reason.
+//
+// Over-tainting is the expensive direction. It spends the user's patience on
+// nothing, and a tool nobody trusts gets uninstalled.
+func TestLocalSearchDoesNotTaint(t *testing.T) {
+	p := Default()
+
+	local := []string{"search_files", "search_code", "grep", "grep_files", "find_files", "list_directory"}
+	for _, tool := range local {
+		if p.IsTaintSource(tool) {
+			t.Errorf("%q taints the session; it searches the local disk and brings in nothing", tool)
+		}
+	}
+
+	// The exclusion must not swallow the tools the pattern was written for.
+	for _, tool := range []string{"web_search", "brave_web_search", "tavily_search", "search_the_web"} {
+		if !p.IsTaintSource(tool) {
+			t.Errorf("%q no longer taints; the exclusion went too far", tool)
+		}
+	}
+}
+
 // TestPathsFoundAnywhereInArguments: rules must not depend on knowing which
 // argument a given server calls "the path one".
 func TestPathsFoundAnywhereInArguments(t *testing.T) {
