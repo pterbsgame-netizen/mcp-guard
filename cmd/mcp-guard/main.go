@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ usage:
   mcp-guard verify [--write] [config-file...]
   mcp-guard watch [config-file...]
   mcp-guard eval [--attack dir] [--benign log-or-dir]
+  mcp-guard version
 
 examples:
   mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
@@ -45,9 +47,22 @@ examples:
 flags:
 `
 
+// version is stamped at build time:
+//
+//	go build -ldflags "-X main.version=v0.1.0" ./cmd/mcp-guard
+//
+// A security tool that cannot say which build it is makes every bug report a
+// guess, so the default says plainly that it was not stamped rather than
+// inventing a number.
+var version = "dev (unstamped)"
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "version", "--version", "-version":
+			fmt.Printf("mcp-guard %s %s/%s %s\n",
+				version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+			return
 		case "replay":
 			os.Exit(runReplay(os.Args[2:]))
 		case "approve":
@@ -599,7 +614,7 @@ func (e *enforceFlag) IsBoolFlag() bool { return true }
 //
 // The command line wins over the file. The policy file is meant to be committed
 // and may belong to somebody else, while whoever is unbreaking this at nine in
-// the morning owns the client config — so the flag has to be able to turn
+// the morning owns the client config вЂ” so the flag has to be able to turn
 // enforcement down, not only up.
 func resolveMode(f *enforceFlag, p *policy.Policy) (policy.Mode, string) {
 	switch {
