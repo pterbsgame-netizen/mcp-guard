@@ -1,0 +1,35 @@
+# Sessions left out of the benign measurement.
+#
+# One pattern per line: a session id, or a glob matched against the log file
+# name. Read automatically by `mcp-guard eval --benign`.
+#
+# Everything here is a run that deliberately exercised the guard. A probe
+# belongs in the attack corpus, not the benign one, and leaving it in ruins the
+# headline number twice over: a refusal that was correct gets counted as a false
+# positive, and a rate meant to describe ordinary work gets inflated by traffic
+# that was never ordinary.
+#
+# Nothing in a session log distinguishes a probe from real work. Only a person
+# knows which run was which, so it has to be written down — and written down
+# here rather than typed on a command line, or the number changes depending on
+# whether whoever ran the measurement remembered the right ids.
+#
+# Measured difference on this corpus the day the file was created:
+#   with these included:  49 calls, 4 deny, 11.1 blocks/week at enforce
+#   with these excluded:  28 calls, 0 deny,  0.0 blocks/week at enforce
+#
+# Add a line whenever a probe run happens. Do not add a session because it
+# produced a block you did not like — that is the measurement working.
+
+# 29 Jul 2026 — first probe: read ~/.ssh/id_rsa, search the profile for **/*.env
+9c87b4296118635f
+
+# 29-30 Jul 2026 — enforce validation matrix: writes to .env, mcp.json,
+# a traversal path, a .cursor directory, plus allow and confirm controls
+63da14ebf053ba1b
+a3dcc98f80884a40
+5a8e972f756d98b3
+b881d32e46c1609d
+5825597da721a356
+a25fec5dd9903399
+4612d35bc325eca7

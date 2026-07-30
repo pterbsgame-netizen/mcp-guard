@@ -86,6 +86,8 @@ func runEval(args []string) int {
 	policyPath := fset.String("policy", "default", `policy for the benign side; "default" or a path`)
 	rulesPath := fset.String("rules", "default", `signatures; "default" or a path`)
 	exclude := fset.String("exclude", "", "comma-separated session ids or file globs to leave out of the benign side")
+	excludeFile := fset.String("exclude-file", eval.DefaultExcludeFile,
+		"file of exclusion patterns, one per line; missing is fine unless named explicitly")
 	fset.Usage = func() { fmt.Fprint(os.Stderr, evalUsage); fset.PrintDefaults() }
 	if err := fset.Parse(args); err != nil {
 		return 2
@@ -121,9 +123,21 @@ func runEval(args []string) int {
 		}
 		attack = &a
 	}
+	patterns := splitList(*exclude)
+	fromFile, err := eval.LoadExcludes(*excludeFile)
+	switch {
+	case err == nil:
+		patterns = append(patterns, fromFile...)
+	case errors.Is(err, fs.ErrNotExist) && *excludeFile == eval.DefaultExcludeFile:
+		// The conventional file is optional; a named one that is missing is not.
+	default:
+		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		return 1
+	}
+
 	var benign *eval.BenignReport
 	if *benignPath != "" {
-		b, err := eval.Benign(*benignPath, rules, rulesForPolicy, splitList(*exclude))
+		b, err := eval.Benign(*benignPath, rules, rulesForPolicy, patterns)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
 			return 1

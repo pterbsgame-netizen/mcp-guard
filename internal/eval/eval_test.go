@@ -179,6 +179,61 @@ func TestExcludeLeavesProbesOut(t *testing.T) {
 	}
 }
 
+// TestLoadExcludes: the list lives in a file so the number does not depend on
+// whoever ran the measurement remembering the right session ids.
+func TestLoadExcludes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "excluded.txt")
+	body := "# a comment\n" +
+		"\n" +
+		"9c87b4296118635f\n" +
+		"  a3dcc98f80884a40  # trailing comment and spaces\n" +
+		"*-probe.jsonl\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	got, err := LoadExcludes(path)
+	if err != nil {
+		t.Fatalf("LoadExcludes: %v", err)
+	}
+	want := []string{"9c87b4296118635f", "a3dcc98f80884a40", "*-probe.jsonl"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("pattern %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	if _, err := LoadExcludes(filepath.Join(dir, "nope.txt")); !os.IsNotExist(err) {
+		t.Errorf("a missing file gave %v, want a not-exist error the caller can recognise", err)
+	}
+}
+
+// TestCommittedExcludeListIsUsable guards the file that actually ships: a typo
+// there silently stops excluding, and the headline number moves without anyone
+// touching a rule.
+func TestCommittedExcludeListIsUsable(t *testing.T) {
+	path := filepath.Join("..", "..", DefaultExcludeFile)
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("no committed exclude list: %v", err)
+	}
+	patterns, err := LoadExcludes(path)
+	if err != nil {
+		t.Fatalf("LoadExcludes: %v", err)
+	}
+	if len(patterns) == 0 {
+		t.Fatal("the committed list parsed to nothing; every probe would count as ordinary work")
+	}
+	for _, p := range patterns {
+		if strings.ContainsAny(p, " \t") {
+			t.Errorf("pattern %q contains whitespace and will never match a file name", p)
+		}
+	}
+}
+
 // TestEmptyBenignSaysSo: a corpus with no calls must report that it proves
 // nothing, not a confident zero.
 func TestEmptyBenignSaysSo(t *testing.T) {

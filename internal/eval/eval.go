@@ -158,6 +158,38 @@ func Benign(path string, rs *detect.Ruleset, p *policy.Policy, exclude []string)
 	return rep, nil
 }
 
+// DefaultExcludeFile is where the list of sessions to leave out is kept by
+// convention, relative to the working directory.
+//
+// It belongs in the repository rather than in someone's shell history: which
+// sessions were deliberate probes is a fact about the corpus that has to
+// survive, or the headline number changes depending on whether whoever ran the
+// measurement remembered to type the right ids.
+const DefaultExcludeFile = "corpus/excluded-sessions.txt"
+
+// LoadExcludes reads exclusion patterns: one per line, # starts a comment,
+// blank lines ignored.
+func LoadExcludes(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var out []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out, sc.Err()
+}
+
 // excluded matches a pattern against the log's file name, as a glob or as a
 // plain substring — so a session id copied out of a report works as-is.
 func excluded(path string, patterns []string) bool {
