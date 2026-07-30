@@ -115,6 +115,7 @@ type Policy struct {
 	Paths   Paths `yaml:"paths"`
 	Exec    Exec  `yaml:"exec"`
 	Taint   Taint `yaml:"taint"`
+	Env     Env   `yaml:"env"`
 
 	deny             []pattern
 	confirm          []pattern
@@ -139,6 +140,63 @@ type Exec struct {
 	Tools           []string `yaml:"tools"`
 	Action          Action   `yaml:"action"`
 	ActionIfTainted Action   `yaml:"action_if_tainted"`
+}
+
+// Env decides which of the proxy's own environment variables the server is
+// allowed to inherit.
+//
+// A filesystem server has no business seeing a cloud credential, and a stdio
+// proxy is the last place able to do anything about it: it is the parent
+// process, so it chooses what the child starts with. This is the one control
+// here that acts before a single message is exchanged.
+type Env struct {
+	Deny  []string `yaml:"deny"`
+	Allow []string `yaml:"allow"`
+}
+
+// FilterEnv splits an environment into what the child gets and the names kept
+// from it.
+//
+// Names only ever leave this function; values are dropped on the floor. The
+// removed list goes into a log that is meant to be readable, and a log that
+// prints a credential to explain that it protected one is not a defence.
+func (p *Policy) FilterEnv(environ []string) (kept []string, removed []string) {
+	if len(p.Env.Deny) == 0 {
+		return environ, nil
+	}
+	kept = make([]string, 0, len(environ))
+	for _, entry := range environ {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			kept = append(kept, entry)
+			continue
+		}
+		if p.envDenied(name) {
+			removed = append(removed, name)
+			continue
+		}
+		kept = append(kept, entry)
+	}
+	sort.Strings(removed)
+	return kept, removed
+}
+
+func (p *Policy) envDenied(name string) bool {
+	// Environment variable names are case-insensitive on Windows and
+	// conventionally uppercase everywhere, so matching folds case rather than
+	// letting AWS_SECRET_ACCESS_KEY through because it arrived lowercased.
+	upper := strings.ToUpper(name)
+	for _, pat := range p.Env.Allow {
+		if matchName(strings.ToUpper(pat), upper) {
+			return false
+		}
+	}
+	for _, pat := range p.Env.Deny {
+		if matchName(strings.ToUpper(pat), upper) {
+			return true
+		}
+	}
+	return false
 }
 
 // Taint marks the tools whose results are content from somewhere nobody

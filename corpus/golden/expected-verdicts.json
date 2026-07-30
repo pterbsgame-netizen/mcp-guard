@@ -1,0 +1,112 @@
+[
+  {
+    "case": "ordinary read",
+    "action": "allow",
+    "rule": ""
+  },
+  {
+    "case": "ordinary write",
+    "action": "allow",
+    "rule": ""
+  },
+  {
+    "case": "directory listing",
+    "action": "allow",
+    "rule": ""
+  },
+  {
+    "case": "no path at all",
+    "action": "allow",
+    "rule": ""
+  },
+  {
+    "case": "text merely mentioning a protected path",
+    "action": "allow",
+    "rule": ""
+  },
+  {
+    "case": "ssh private key",
+    "action": "deny",
+    "rule": "~/.ssh/**"
+  },
+  {
+    "case": "ssh authorized_keys",
+    "action": "deny",
+    "rule": "~/.ssh/**"
+  },
+  {
+    "case": "aws credentials",
+    "action": "deny",
+    "rule": "~/.aws/**"
+  },
+  {
+    "case": "agent config",
+    "action": "deny",
+    "rule": "**/mcp.json"
+  },
+  {
+    "case": "claude desktop config",
+    "action": "deny",
+    "rule": "**/claude_desktop_config.json"
+  },
+  {
+    "case": "git hook",
+    "action": "deny",
+    "rule": "**/.git/hooks/**"
+  },
+  {
+    "case": "dotenv by traversal",
+    "action": "deny",
+    "rule": "**/.env"
+  },
+  {
+    "case": "relative dotenv, cwd unknown",
+    "action": "deny",
+    "rule": "**/.env"
+  },
+  {
+    "case": "the guard's own policy",
+    "action": "deny",
+    "rule": "**/mcp-guard.policy.yaml"
+  },
+  {
+    "case": "destination is what matters",
+    "action": "deny",
+    "rule": "~/.ssh/**"
+  },
+  {
+    "case": "nested under an unfamiliar argument name",
+    "action": "deny",
+    "rule": "~/.gnupg/**"
+  },
+  {
+    "case": "package manifest",
+    "action": "confirm",
+    "rule": "**/package.json"
+  },
+  {
+    "case": "exec class, clean session",
+    "action": "confirm",
+    "rule": "exec:*exec*"
+  },
+  {
+    "case": "exec class, tainted session",
+    "action": "deny",
+    "rule": "exec:*exec*"
+  },
+  {
+    "case": "shell script, clean session",
+    "action": "allow",
+    "rule": ""
+  },
+  {
+    "case": "shell script, tainted session",
+    "action": "confirm",
+    "rule": "**/*.sh"
+  },
+  {
+    "case": "workflow file, tainted session",
+    "action": "confirm",
+    "rule": "**/.github/workflows/**"
+  }
+]

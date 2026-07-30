@@ -92,6 +92,41 @@ exec:
   action: confirm
   action_if_tainted: deny
 
+env:
+  # Variables the server does not inherit. The proxy is the parent process, so
+  # this is decided before the server has run a single instruction — the only
+  # control here that acts before any message is exchanged.
+  #
+  # The patterns describe the *shape of a secret's name*, not a vendor. A rule
+  # like "ANTHROPIC_*" would strip ANTHROPIC_BASE_URL, which is a configuration
+  # URL and not a credential, and "API*" would take API_TIMEOUT_MS with it.
+  # Both are real variables on the machine this was written on.
+  deny:
+    - "*_TOKEN"
+    - "*_SECRET"
+    - "*_PASSWORD"
+    - "*_PASSWD"
+    - "*_CREDENTIALS"
+    - "*_API_KEY"
+    - "*_APIKEY"
+    - "*_ACCESS_KEY"
+    - "*_ACCESS_KEY_ID"
+    - "*_SECRET_KEY"
+    - "*_PRIVATE_KEY"
+    - "*_SESSION_TOKEN"
+    - "*_AUTH"
+    - "AWS_ACCESS_KEY_ID"
+    - "AWS_SECRET_ACCESS_KEY"
+    - "AWS_SESSION_TOKEN"
+    - "GITHUB_TOKEN"
+    - "GH_TOKEN"
+    - "NPM_TOKEN"
+
+  # Kept despite matching. A server that genuinely needs a credential — a
+  # GitHub server, say — is given its own policy file naming it here, rather
+  # than every server being handed everything because one of them needs one.
+  allow: []
+
 taint:
   # Tools whose results are content from somewhere nobody vouches for. A result
   # from one of these does not block anything by itself; it tightens what the

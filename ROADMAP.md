@@ -64,8 +64,11 @@ the log holds a full session. ✅ Verified against
       protocol-native way and the handshake log proves no connected client
       declares it, so at `strict` a confirm is refused with an explanation
       instead. Capabilities are now captured so this can be revisited with data.
-- [ ] Environment filtering for the child process (`AWS_*`, `GITHUB_TOKEN`,
-      `*_API_KEY`) — named in plan §1.3, `Options.Env` exists, no filter written
+- [x] Environment filtering for the child process. The patterns describe the
+      shape of a secret's name rather than a vendor: `ANTHROPIC_*` would have
+      stripped `ANTHROPIC_BASE_URL`, and `API*` would have taken
+      `API_TIMEOUT_MS` — both real variables on the machine it was written on.
+      Removed names are logged, values never are.
 
 **Done when:** CurXecute is blocked **at the write**, and the whole benign corpus
 produces zero blocks. First half ✅ (four spellings, end to end). Second half
@@ -102,7 +105,12 @@ produces zero blocks. First half ✅ (four spellings, end to end). Second half
 - [x] Recall metric
 - [x] Observe is the default on install
 - [~] Benign corpus — collecting, but only 2 tool calls so far
-- [ ] Golden files for policy decisions (`input.jsonl` + `expected-verdicts.json`)
+- [x] Golden files for policy decisions — `corpus/golden/`, 22 named cases from
+      ordinary work through traversal, relative paths and taint escalation.
+      Written with `~` and no case-sensitive cases, so the answers hold on both
+      platforms and the test runs in CI. `-update-golden` regenerates; the diff
+      is meant to be read, since this is the only thing that notices a rule
+      change quietly moving a decision.
 - [ ] False-positive rate per rule
 
 ---

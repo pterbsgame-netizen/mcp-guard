@@ -238,6 +238,92 @@ func TestLocalSearchDoesNotTaint(t *testing.T) {
 	}
 }
 
+// TestEnvFilter: the proxy is the parent process, so what the server inherits
+// is the one thing it can decide before a single message is exchanged.
+func TestEnvFilter(t *testing.T) {
+	p := Default()
+
+	environ := []string{
+		"PATH=C:\\Windows",
+		"HOME=C:\\Users\\me",
+		"AWS_SECRET_ACCESS_KEY=abc",
+		"GITHUB_TOKEN=ghp_x",
+		"MY_SERVICE_API_KEY=k",
+		"DB_PASSWORD=p",
+		"aws_session_token=lowercase",
+		// Real variables from the machine this was written on. Neither is a
+		// credential, and a vendor-prefix rule would have taken both.
+		"ANTHROPIC_BASE_URL=https://api.example",
+		"API_TIMEOUT_MS=60000",
+	}
+
+	kept, removed := p.FilterEnv(environ)
+
+	mustKeep := []string{"PATH=", "HOME=", "ANTHROPIC_BASE_URL=", "API_TIMEOUT_MS="}
+	for _, want := range mustKeep {
+		found := false
+		for _, e := range kept {
+			if strings.HasPrefix(e, want) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s was stripped; it is not a credential", strings.TrimSuffix(want, "="))
+		}
+	}
+
+	mustDrop := []string{"AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "MY_SERVICE_API_KEY", "DB_PASSWORD",
+		"aws_session_token"}
+	for _, name := range mustDrop {
+		for _, e := range kept {
+			if strings.HasPrefix(e, name+"=") {
+				t.Errorf("%s reached the server", name)
+			}
+		}
+	}
+	if len(removed) != len(mustDrop) {
+		t.Errorf("removed %v, want %d entries", removed, len(mustDrop))
+	}
+
+	// Values must never leave FilterEnv, only names.
+	for _, name := range removed {
+		if strings.Contains(name, "=") {
+			t.Errorf("removed entry %q carries a value; the log would print the secret", name)
+		}
+	}
+}
+
+// TestEnvAllowWinsOverDeny: a server that genuinely needs a credential gets its
+// own policy naming it, rather than every server being handed everything.
+func TestEnvAllowWinsOverDeny(t *testing.T) {
+	p, err := Parse([]byte("version: 1\nenv:\n  deny: [\"*_TOKEN\"]\n  allow: [\"GITHUB_TOKEN\"]\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	kept, removed := p.FilterEnv([]string{"GITHUB_TOKEN=keep", "NPM_TOKEN=drop"})
+	if len(kept) != 1 || !strings.HasPrefix(kept[0], "GITHUB_TOKEN=") {
+		t.Errorf("kept = %v, want the allowed token only", kept)
+	}
+	if len(removed) != 1 || removed[0] != "NPM_TOKEN" {
+		t.Errorf("removed = %v, want [NPM_TOKEN]", removed)
+	}
+}
+
+// TestEmptyEnvDenyChangesNothing: a policy without an env section must hand the
+// environment through untouched, or every existing policy file silently starts
+// breaking servers.
+func TestEmptyEnvDenyChangesNothing(t *testing.T) {
+	p, err := Parse([]byte("version: 1\n"))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	in := []string{"A=1", "SOME_TOKEN=2"}
+	kept, removed := p.FilterEnv(in)
+	if len(kept) != len(in) || len(removed) != 0 {
+		t.Errorf("kept %v removed %v, want the input untouched", kept, removed)
+	}
+}
+
 // TestPathsFoundAnywhereInArguments: rules must not depend on knowing which
 // argument a given server calls "the path one".
 func TestPathsFoundAnywhereInArguments(t *testing.T) {

@@ -138,6 +138,21 @@ func Run(ctx context.Context, o Options) (Result, error) {
 
 	cmd := exec.Command(o.Argv[0], o.Argv[1:]...)
 	cmd.Env = o.Env
+	if o.Policy != nil {
+		// The proxy is the parent, so what the server inherits is its choice.
+		// This is the only control that acts before the server runs at all.
+		base := o.Env
+		if base == nil {
+			base = os.Environ()
+		}
+		kept, removed := o.Policy.FilterEnv(base)
+		cmd.Env = kept
+		if len(removed) > 0 {
+			// Names only. A log that prints a credential to explain that it
+			// protected one is not a defence.
+			o.Log.Event("env-filtered", map[string]any{"removed": removed})
+		}
+	}
 	// stderr is relayed 1:1 and never swallowed. MCP servers log there and
 	// clients surface it to the user; capturing it turns every server-side
 	// error into "it just doesn't work". A copy also goes to the session log,
