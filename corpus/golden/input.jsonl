@@ -1,0 +1,22 @@
+{"case":"ordinary read","tool":"read_text_file","args":{"path":"~/dev/project/main.go"}}
+{"case":"ordinary write","tool":"write_file","args":{"path":"~/dev/project/README.md","content":"hi"}}
+{"case":"directory listing","tool":"list_directory","args":{"path":"~/dev"}}
+{"case":"no path at all","tool":"list_allowed_directories","args":{}}
+{"case":"text merely mentioning a protected path","tool":"write_file","args":{"path":"~/dev/notes.md","content":"check ~/.ssh/config and the .env handling"}}
+{"case":"ssh private key","tool":"read_text_file","args":{"path":"~/.ssh/id_rsa"}}
+{"case":"ssh authorized_keys","tool":"write_file","args":{"path":"~/.ssh/authorized_keys","content":"x"}}
+{"case":"aws credentials","tool":"read_text_file","args":{"path":"~/.aws/credentials"}}
+{"case":"agent config","tool":"write_file","args":{"path":"~/dev/project/.cursor/mcp.json","content":"{}"}}
+{"case":"claude desktop config","tool":"write_file","args":{"path":"~/dev/claude_desktop_config.json","content":"{}"}}
+{"case":"git hook","tool":"write_file","args":{"path":"~/dev/project/.git/hooks/pre-commit","content":"x"}}
+{"case":"dotenv by traversal","tool":"write_file","args":{"path":"~/dev/project/docs/../.env","content":"x"}}
+{"case":"relative dotenv, cwd unknown","tool":"read_text_file","args":{"path":"config/.env"}}
+{"case":"the guard's own policy","tool":"write_file","args":{"path":"~/dev/project/mcp-guard.policy.yaml","content":"x"}}
+{"case":"destination is what matters","tool":"move_file","args":{"source":"~/dev/notes.txt","destination":"~/.ssh/authorized_keys"}}
+{"case":"nested under an unfamiliar argument name","tool":"batch_write","args":{"operations":[{"target":"~/dev/a.txt"},{"target":"~/.gnupg/secring.gpg"}]}}
+{"case":"package manifest","tool":"write_file","args":{"path":"~/dev/project/package.json","content":"{}"}}
+{"case":"exec class, clean session","tool":"execute_blender_code","args":{"code":"print(1)"}}
+{"case":"exec class, tainted session","tool":"execute_blender_code","args":{"code":"print(1)"},"tainted":true}
+{"case":"shell script, clean session","tool":"write_file","args":{"path":"~/dev/project/build.sh","content":"echo hi"}}
+{"case":"shell script, tainted session","tool":"write_file","args":{"path":"~/dev/project/build.sh","content":"echo hi"},"tainted":true}
+{"case":"workflow file, tainted session","tool":"write_file","args":{"path":"~/dev/project/.github/workflows/ci.yml","content":"x"},"tainted":true}

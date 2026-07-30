@@ -1,170 +1,106 @@
 # mcp-guard
 
-A single static binary that sits between an MCP client and an MCP stdio server,
-records everything, and — eventually — enforces a policy on what tools are
-allowed to *do*.
+[![CI](https://github.com/pterbsgame-netizen/mcp-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/pterbsgame-netizen/mcp-guard/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Status: stage 0.** Right now it is a tap, not a guard. It relays bytes and
-writes a session log. It blocks nothing, inspects nothing, rewrites nothing.
+A security proxy for MCP stdio servers. Your client launches `mcp-guard`,
+`mcp-guard` launches the real server, and everything between them is relayed,
+recorded, and — depending on the level — refused.
 
-## Why another one
+One static binary. No account, no network calls, no runtime to install.
 
-`mcp-scan` (Invariant Labs / Snyk) and the Lasso MCP Gateway already exist. The
-bet here is on three differences:
+```
+Claude Desktop ──stdio── mcp-guard ──stdio── npx server-filesystem
+                             │
+                             └── session log, policy, tool pinning
+```
 
-1. **One static binary, zero runtime dependencies, zero network calls.** The
-   artifact is a line in someone else's `mcp.json`. Download a file, point at
-   it, done — no pip, no venv, no interpreter version, no API key, no cloud
-   guardrail endpoint. Detection is fully offline and deterministic.
-2. **It never edits your config.** You wire it in by hand, once. Nothing
-   injects itself into server configs at startup and unwinds on exit, so there
-   is no window where a crash leaves a mangled `mcp.json` behind.
-3. **Effects, not content.** The core is a policy over tool calls — what got
-   written, what got executed, where the data came from — not a classifier
-   trying to decide whether a string is "an instruction". Content inspection
-   only ever raises a taint level; it never blocks on its own.
+## The problem
 
-### How this compares, as of July 2026
+An MCP server can read your files and run your code. Nothing checks what it
+does with that, and three things go wrong in practice:
 
-`mcp-scan` is now **Snyk Agent Scan** (`snyk-agent-scan`). Reading its README
-changed the picture rather than confirming it, so the differences worth naming
-are not the ones assumed at the start:
+- A server changes a tool's description after you approved it, and the new one
+  tells your agent to read `~/.ssh/id_rsa` first.
+- Content the agent fetched — a web page, an issue, an email — contains text
+  the model treats as instruction.
+- Someone edits the config that decides which servers run at all.
 
-| | Snyk Agent Scan | mcp-guard |
-|---|---|---|
-| shape | scanner and inventory | runtime proxy |
-| when it acts | before or between sessions | on every message |
-| account required | Snyk sign-up plus `SNYK_TOKEN` | none |
-| network | reports to Snyk Evo in background mode | never |
-| breadth | 13 agents, MCP servers **and** skills, 15+ issue codes | one transport, three threat classes |
-| enforcement | reports | refuses the call |
+## The rule this follows
 
-The overlap is smaller than it looks. Agent Scan answers "what is installed and
-does any of it look dangerous"; that is inventory across a fleet, and it does it
-across far more surface than this ever will. mcp-guard answers "this specific
-call is about to write to `~/.ssh` — no", which is a different question asked at
-a different moment.
+> **Control effects, not content.**
 
-Two things are worth knowing before choosing:
+In MCP an instruction and data are the same bytes, so "is this text a command"
+has no answer. "Is this call about to write to `~/.ssh`" is a fact. Policy
+decides on effects. Content signatures may only raise a suspicion level — they
+never block, by construction.
 
-- **Scanning a config executes it.** To read tool descriptions, Agent Scan
-  starts the stdio servers listed in the config; it asks for consent per server
-  and recommends a sandbox for untrusted configs. mcp-guard's `approve` starts a
-  server too, but only the one named on its command line, never a config's worth.
-- **The cloud dependency is now mandatory, not optional.** A token is required
-  before any scan. Being able to run with no account and no network was a guess
-  when this project started; it is now the clearer difference.
+The metric that decides whether a tool like this survives is **blocks per week
+of ordinary use**. Target: under one.
 
-Scope note: this is from the README, not from running it — the tool needs a Snyk
-account this machine does not have. What it does at runtime, and whether the
-proxy mode the older `mcp-scan` shipped still exists, is not something reading
-documentation can settle.
+## Install
 
-## Design rule
-
-> Do not classify content. Control effects.
-
-CurXecute is not stopped by recognising an instruction inside a Slack message.
-It is stopped by refusing the write to `~/.cursor/mcp.json`. That is
-deterministic, testable, has a measurable false-positive rate, and does not fall
-over when the attacker rephrases.
-
-## Build
+Download a binary from [releases](https://github.com/pterbsgame-netizen/mcp-guard/releases),
+or:
 
 ```bash
-go build -o dist/mcp-guard.exe ./cmd/mcp-guard
+go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest
 ```
+
+Then put it in front of a server you already run. Claude Desktop,
+`claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "C:\\path\\to\\mcp-guard.exe",
+      "args": [
+        "--policy", "default", "--",
+        "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\dev"
+      ]
+    }
+  }
+}
+```
+
+Everything after `--` is the command you had before. Restart the client. If it
+worked, nothing changed: same tools, same calls, same errors — and a session log
+appears under `~/.mcp-guard/sessions`.
+
+**Start in observe mode**, which is the default. It records what it would have
+refused and refuses nothing. Live with it for a week, read the numbers, then
+switch enforcement on.
+
+## What it does
+
+### Pins what a server advertises
 
 ```bash
-go test ./...
+mcp-guard approve -- npx -y @modelcontextprotocol/server-filesystem ~/dev
 ```
 
-The race detector is worth running — the proxy has three goroutines and one of
-them deliberately outlives `Run`. On Windows `-race` needs cgo and a C compiler,
-which an MSYS2 install does not put on `PATH`. In PowerShell:
+Writes `mcp-guard.lock` with each tool's name, description and input schema.
+Commit it: a tool that later rewrites its description or widens its schema shows
+up in a diff during review.
 
-```powershell
-$env:Path = "C:\msys64\ucrt64\bin;$env:Path"; $env:CGO_ENABLED = "1"; go test -race ./...
-```
+Schemas are canonicalised (RFC 8785) before hashing, so a server that
+re-serialises its output between runs is not mistaken for one that changed it —
+which is the difference between a useful check and one you turn off on day two.
 
-The equivalent on Linux or macOS, where the toolchain is already there:
+`mcp-guard approve --diff` reports changes and exits non-zero, so it can gate a
+build.
 
-```sh
-go test -race ./...
-```
-
-## Use
+### Decides what a call may do
 
 ```bash
-mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
+mcp-guard --policy default -enforce -- npx -y ... 
 ```
 
-Everything after `--` is the real server command. `mcp-guard` starts it, relays
-stdin/stdout/stderr unchanged, and writes one JSON object per message to a log.
-
-Each run gets its own file under `--log-dir` (`~/.mcp-guard/sessions` by
-default), named so the directory sorts chronologically. That is not tidiness: a
-client runs one proxy per configured server, so several are alive at once, and
-pointing them all at one file interleaves their sessions and turns rotation into
-a race between processes renaming the same file. `--log` writes to a single file
-instead, and is only safe with one proxy running.
-
-Logs are rotated past `--log-max-bytes` (64 MiB by default, `0` disables it).
-Nothing is ever deleted — the corpus is the point — so old segments are yours to
-prune. It adds up faster than it looks: one `tools/list` response from a real
-server runs to ~15 KB, and the client repeats the handshake on every restart, so
-the corpus grows even on days when no tool is ever called.
-
-### Pinning what a server advertises
-
-```bash
-mcp-guard approve -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
-```
-
-This starts the server, asks what tools it has, and writes `mcp-guard.lock`
-recording each tool's name, description and input schema. Commit that file: a
-tool that later rewrites its description or widens its schema then shows up in a
-diff during review, which is where it should be caught.
-
-```bash
-mcp-guard approve --diff -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
-```
-
-reports what changed and exits non-zero if anything did, so it can gate a build.
-
-To have the proxy check as it runs, point it at the lock:
-
-```bash
-mcp-guard --lock mcp-guard.lock -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
-```
-
-By default a mismatch is recorded and the call goes through. `--enforce` refuses
-calls to tools that changed, answering the client with the reason instead of the
-result. Run in the default mode for a week first: a tool that breaks a workflow
-the day it is installed is uninstalled the day it is installed.
-
-**What pinning does not do.** `tools/list` is never blocked — refusing it leaves
-the client with no tools and a broken server — so a rewritten description does
-reach the model before any call is refused. Pinning catches the change and stops
-the effect; it does not stop the text from being read. Controlling effects is
-stage 3's job.
-
-### Controlling what calls are allowed to do
-
-```bash
-mcp-guard --policy default -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
-```
-
-The policy decides on **effects**, never on wording. CurXecute is not stopped by
-noticing an instruction inside a message; it is stopped because a call tried to
-write to the file that decides which servers run. That is a fact about the call,
-it is testable, its false positives are countable, and rephrasing does not get
-around it.
-
-Paths are resolved before they are matched, so there is no spelling that walks
-past a rule: `~`, `%USERPROFILE%`, `$HOME`, `..` segments, symlinks, letter case,
-Windows 8.3 short names, `\\?\` prefixes and NTFS alternate data streams all
-reduce to one form first.
+Paths are resolved **before** they are matched, so there is no spelling that
+walks past a rule: `~`, environment variables, `..` segments, symlinks, letter
+case, Windows 8.3 short names, `\\?\` prefixes and NTFS alternate data streams
+all reduce to one form first.
 
 Rules are data, in three pattern forms and no more:
 
@@ -176,58 +112,76 @@ paths:
 ```
 
 `~/.ssh/**` is a subtree, `~/.bashrc` is one file, `**/.env` is that name
-anywhere. Write your own with `--policy path/to/rules.yaml`; the built-in set is
-`internal/policy/default.yaml`.
+anywhere. Write your own with `--policy path/to/rules.yaml`.
 
-**Taint.** A result from a tool that brings in content nobody vouches for —
-fetched pages, mail, issues — marks the session. Which tools those are is a
-list of name patterns in the policy; the official fetch server's only tool is
-called `fetch`, and a test pins that it and the other common spellings are
-actually recognised, because a taint source nobody matches is a stage that
-never runs. Nothing is blocked for that
-reason alone; it tightens what the rules already say, so a write that is
-ordinary during honest work becomes something to confirm afterwards. The
-decision is about where the content came from, not what it says, which is why
-rewording does not defeat it.
+Candidate paths are pulled from anywhere in a call's arguments, not from a
+parameter named `path` — otherwise every server would need its own special case,
+and an unfamiliar one would be covered by nothing.
 
-### Three levels
+### Tracks where content came from
+
+A result from a tool that brings in content nobody vouches for — fetched pages,
+mail, issues — marks the session. Nothing is blocked for that alone; it tightens
+what the rules already say, so a write that is ordinary during honest work
+becomes something to confirm afterwards.
+
+The decision is about the source, not the wording, which is why rephrasing does
+not defeat it.
+
+### Scores content, and never blocks on it
+
+Tool results are scanned for instruction-shaped text. Before matching, the text
+is unfolded: base64, hex, percent-encoding, HTML comments and `display:none`
+blocks are decoded, and zero-width characters, Cyrillic lookalikes, fullwidth
+forms and bidirectional overrides are folded away.
+
+A match **cannot** block. It raises the taint level and nothing else. The rules
+are in a public repository, so evading them takes about thirty seconds, while
+the false positives land on the user every day. As a defence the value is near
+zero; as a reason to be stricter about effects afterwards it is real.
+
+### Guards the config itself
+
+```bash
+mcp-guard verify --write   # record
+mcp-guard verify           # check, non-zero if changed
+mcp-guard watch            # keep watching
+```
+
+This lives outside the traffic path deliberately: the proxy is a line in the
+file it would be guarding, so anyone who can rewrite that file removes the proxy
+first.
+
+Only the MCP server declarations are recorded, never whole files — clients keep
+caches and window positions in the same files and rewrite them constantly.
+Environment variable and header **names** are covered; their values never are.
+
+### Filters the child's environment
+
+The proxy is the parent process, so it decides what the server inherits. A
+filesystem server does not start life holding a cloud credential. Patterns match
+the shape of a secret's name (`*_TOKEN`, `*_API_KEY`) rather than a vendor
+prefix, which would strip configuration variables that merely share a word.
+
+## Enforcement levels
 
 | level | `deny` | `confirm` |
 |---|---|---|
 | `observe` (default) | recorded | recorded |
-| `enforce` | **refused** | recorded, announced on stderr, relayed |
+| `enforce` | **refused** | recorded, announced, relayed |
 | `strict` | **refused** | **refused** |
 
 ```bash
-mcp-guard -enforce -- npx ...
+mcp-guard -enforce -- ...          # deny only
+mcp-guard -enforce=strict -- ...   # confirm too
+mcp-guard -enforce=off -- ...      # back to observing
 ```
 
-`-enforce=strict` refuses confirms too; `-enforce=off` goes back to observing.
-
-The two lists are not the same kind of thing, which is why they are not
-enforced together. `deny` covers credentials, agent configuration and shell
-startup files — places honest work never writes. `confirm` covers
-`package.json`, Makefiles and shell scripts, which it writes all day. A guard
-that refuses the second kind on the day it is switched on is switched off the
-same day, and then it guards nothing at all.
-
-`mode:` in the policy file takes the same three values. **The flag wins when
-both are set**, in either direction: a policy file is meant to be committed and
-may belong to somebody else, while whoever is unbreaking this at nine in the
-morning owns the client config.
-
-Pin mismatches are their own case. A tool that *changed* since you approved it
-is refused whenever enforcing — it is rare, precise, and the refusal names the
-cure. A tool list that could not be checked at all is only held at `strict`:
-"we do not know" is a far weaker claim than "it changed", and under enforcement
-its blast radius would be the whole server dying over one malformed schema.
-
-**What `confirm` does at `strict`.** It refuses, with an explanation. The
-protocol has `elicitation/create` for asking the user, but no client seen so far
-declares it — mcp-guard now records what each side declared during the
-handshake, so that claim can be checked against the logs instead of assumed.
-Until one does, there is no way to ask from inside a stdio proxy, and refusing
-while saying so beats pretending to have asked.
+The two lists are not the same kind of thing. `deny` covers credentials, agent
+configuration and shell startup files, which honest work never writes. `confirm`
+covers `package.json`, Makefiles and shell scripts, which it writes all day. A
+guard that refuses the second kind on the day it is installed is uninstalled the
+same day.
 
 ### If it goes wrong
 
@@ -235,203 +189,102 @@ while saying so beats pretending to have asked.
 MCPGUARD_OFF=1
 ```
 
-Set that in the client's environment and mcp-guard relays with no checks at
-all: no pin check, no policy, no content scan. It is read before any
-configuration file is opened, so a typo in a policy — otherwise a refusal to
-start, and therefore an MCP server that simply never appears in the client —
+Set that in the client's environment and mcp-guard relays with no checks at all.
+It is read before any config file is opened, so a broken policy — otherwise a
+refusal to start, and therefore a server that never appears in your client —
 cannot cost you your tools. Only affirmative values count, so `MCPGUARD_OFF=0`
-does not disarm the guard.
+does not disarm it.
 
-The session log keeps being written and records `from: "off"`, so an
-unprotected session is identifiable afterwards rather than silently
-indistinguishable from a guarded one.
-
-### Content signals, which never block
-
-With a policy in place, tool results are scanned for instruction-shaped content.
-A match does **not** block anything and cannot: it raises the session's taint
-level, which makes the effect rules stricter. That is the whole contract.
-
-The reason is not modesty about regular expressions. The rules are in a public
-repository, so getting around them takes an attacker about thirty seconds, while
-the false positives land on the user every day — a blog post about prompt
-injection, a code review of a file containing the phrase. As a defence the value
-is near zero; as telemetry, and as a reason to be stricter about effects
-afterwards, it is real. It is kept in exactly that role.
-
-Before matching, text is unfolded so a signature written in plain English still
-finds a disguised instruction: base64, hex, percent-encoding, HTML comments and
-`display:none` blocks are decoded, and zero-width characters, Cyrillic
-lookalikes, fullwidth forms and bidirectional overrides are folded away. An
-instruction found only after decoding scores higher than one in plain view,
-because prose does not accidentally hide itself.
-
-Signatures are deliberately weak: no single phrase reaches the threshold alone,
-because install docs pipe scripts into shells and this project's own README
-talks about refusing writes to `mcp.json`. Missing a taint is not missing an
-attack — the effect rules refuse the write to `mcp.json` on their own, whatever
-the surrounding text says.
-
-### Measuring it
+## Reading it back
 
 ```bash
+mcp-guard replay      # human-readable transcript of recorded sessions
 mcp-guard eval --attack corpus/attack --benign ~/.mcp-guard/sessions
 ```
 
-Recall on the attack corpus is the easy number and is currently 100% over six
-published shapes — but every rule was written after reading them, so it proves
-the rules match their own examples, not that they generalise. The number that
-decides whether the tool survives is the false-positive rate on real traffic,
-which cannot be manufactured. The benign side reports how much evidence it
-actually had, so a rate measured over four calls is not mistaken for a rate, and
-the headline "blocks per week" refuses to compute from less than an hour of
-elapsed time.
+`replay` is offline and deterministic: no server is started, so the same log
+always produces the same transcript. It shows which reply answered which
+request, how long it took, what each `tools/call` targeted, and the server's own
+stderr interleaved where it happened.
 
-### Guarding the config itself
+`eval` prints recall on the attack corpus and, more importantly, the false
+positive rate on your own recorded traffic — with the number of calls printed
+beside it, because a zero over two calls is not a rate.
 
-The proxy is a line in the config it would be guarding. Anyone who can rewrite
-that file removes the proxy from the chain first, and everything downstream
-becomes theatre. So this part lives outside the traffic path:
+## Measured, not asserted
 
-```bash
-mcp-guard verify --write
-```
+On the development machine, at `enforce`: **28 tool calls of ordinary work over
+two days, zero blocks.**
 
-records the MCP server declarations found in the known client configs.
+Deliberate probes are excluded from that count and listed in
+`corpus/excluded-sessions.txt`; including them gives 11.1 blocks per week, which
+is four correct refusals of attacks rather than friction to be tuned away.
 
-```bash
-mcp-guard verify
-```
+`strict` produces roughly 30 refusals a week in the same workload, all of it one
+exec-class tool. That does not improve with more data — it improves when a
+confirm can be answered instead of refused.
 
-checks them and exits non-zero if anything changed.
+This is one machine and one workload. Treat it as a starting point for your own
+measurement, not as a result.
 
-```bash
-mcp-guard watch
-```
+## What it does not do
 
-does the same continuously, reporting as it happens.
+- **`tools/list` is never blocked.** Refusing it leaves the client with no tools
+  and a visibly broken server, so a rewritten description does reach the model
+  before any call is refused. Pinning stops the effect, not the reading.
+- **`confirm` cannot ask.** `elicitation/create` is the protocol's answer, and no
+  client seen so far declares support for it, so at `strict` a confirm is refused
+  with an explanation instead. Declared capabilities are logged, so this can be
+  revisited with evidence.
+- **Only stdio.** A server added over HTTP is unguarded, silently.
+- **Taint does not cross servers.** One proxy per server means one session each,
+  so fetching a poisoned page taints that proxy and the one running code never
+  hears about it — even though the threat model is cross-server by nature.
+- **A stdio proxy cannot see a server's own network traffic.** A server with
+  built-in telemetry exfiltrates without a byte crossing this proxy.
+- **Unicode NFC/NFD path normalisation is not implemented**, so a non-ASCII path
+  may spell differently on macOS than a rule written on Linux.
 
-Only the server declarations are recorded, never whole files. Clients keep
-caches, feature flags and window positions in the same files and rewrite them
-constantly; a whole-file hash would fire every few minutes and be ignored within
-a day. Environment variable and header *names* are covered — a credential
-reaching a server it did not use to reach is exactly the thing to catch — and
-their values never are, because this file belongs in a repository.
+## How this compares
 
-Keep the baseline in a repository rather than beside the configs it guards: one
-stored next to what it protects is editable by whoever edits that.
+`mcp-scan` is now **Snyk Agent Scan**: a scanner and inventory across thirteen
+agents, MCP servers and skills, with a background mode reporting to a Snyk
+instance. It requires an account and an API token before any scan runs.
 
-Which repository matters, though, and the two cases are not the same. A baseline
-scoped to a **project** covers that project's `.cursor/mcp.json` and belongs in
-it, where a change shows up in review like any other. One scoped to a **machine**
-covers `%APPDATA%\Claude` and `~/.claude.json`, and records its owner's
-directory layout and the list of servers they run — worth keeping under version
-control somewhere private, and worth thinking about before it goes anywhere
-public. This repository ignores both, because anything generated here is the
-second kind.
+The overlap is smaller than it looks. Agent Scan answers "what is installed and
+does any of it look dangerous", across far more surface than this will ever
+cover. mcp-guard answers "this call is about to write to `~/.ssh` — no", which
+is a different question at a different moment.
 
-### Reading a session back
+Worth knowing: scanning a config **executes** the servers listed in it, to read
+their tool descriptions. `mcp-guard approve` starts only the one server named on
+its command line.
 
-```bash
-mcp-guard replay
-```
+*(From reading its documentation, not from running it.)*
 
-With no argument it replays every log in the default directory; give it a file
-or a directory to replay that instead. Output is a transcript: direction, method
-names, which reply answered which request and how long it took, the tool each
-`tools/call` targeted, and a per-run summary of the negotiated protocol version,
-the advertised tools and the calls that failed. It is offline and deterministic
-— no server is started and nothing is contacted, so the same log always produces
-the same transcript.
-
-### Wiring into a client
-
-Replace the server's own command with `mcp-guard` plus the original command.
-Claude Desktop, `%APPDATA%\Claude\claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "C:\\Users\\me\\dev\\mcp-guard\\dist\\mcp-guard.exe",
-      "args": [
-        "--log", "C:\\Users\\me\\.mcp-guard\\session.jsonl",
-        "--",
-        "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\tmp"
-      ]
-    }
-  }
-}
-```
-
-Restart the client. If everything is right, nothing changes: the same tools
-appear, the same calls work, the same errors show up — and the session lands in
-the log.
-
-## The session log is sensitive
-
-`session.jsonl` contains the verbatim content of every tool call and every tool
-result: file contents, API responses, and any credential the agent happened to
-read along the way. It is in `.gitignore`. Treat it like a password file, and do
-not paste it into an issue.
-
-Permissions are restricted to the owning user. On Unix that is just the `0600`
-the file is created with. On Windows the mode argument is very nearly a no-op —
-it maps only to the read-only attribute, and the file otherwise inherits the
-directory ACL, which on a stock profile hands `SYSTEM` and `Administrators` full
-control — so the DACL is set explicitly instead: protected, inheritance severed,
-one allow-all entry for the owning user. This is the only reason the project
-depends on anything outside the standard library.
-
-If that fails, `mcp-guard` says so on stderr and keeps going rather than taking
-the client's server down with it.
-
-## Roadmap
-
-| Stage | What | State |
-|---|---|---|
-| 0 | Transparent pipe + session log | **done** |
-| 1 | JSON-RPC parsing, request/response correlation, session model, `replay` | **done** |
-| 2 | Tool pinning, plus `verify`/`watch` over client configs | **done** |
-| 3 | Effect policy + taint propagation ← the actual product | **done** |
-| 4 | Content normalisation, advisory signals, an `eval` metrics harness | **done** |
-
-Default mode on install is **observe**, never enforce. A tool that breaks
-someone's workflow on day one gets uninstalled on day one.
-
-### What is not proven yet
-
-The false-positive rate, and it is worth being precise about why.
-
-The attack side is covered by tests — CurXecute is refused at the write, a
-silently swapped tool description is caught, a rewritten config is reported.
-Taint has now fired end to end against the real fetch server, so the escalation
-is not just tested in isolation.
-
-"Ordinary work never trips" is the claim with no evidence behind it. It can only
-be measured against real sessions, and a corpus is only as good as the surface
-it covers: one filesystem server scoped to a single project directory exercises
-a handful of rules and none of the rest. A zero measured there means "little was
-attempted", not "the rules are good", and reporting it as a false-positive rate
-would be dressing up an absence of data.
+## Build from source
 
 ```bash
-mcp-guard eval --benign ~/.mcp-guard/sessions
+go build -o dist/mcp-guard ./cmd/mcp-guard
+go test ./...
 ```
 
-reports how many calls it actually judged alongside the rate, so the two are
-never confused. Until that count is large and varied, treat enforcement as
-untested on real traffic.
+The race detector needs cgo and a C compiler:
 
-## Notes on Windows
+```bash
+CGO_ENABLED=1 go test -race ./...
+```
 
-Development happens on Windows, which the design has to account for rather than
-defer:
+Dependencies: `golang.org/x/sys` (Windows ACLs on the session log),
+`fsnotify` (config watching), `yaml.v3` (policy files). Nothing else.
 
-- There is no `SIGTERM`. Closing the server's stdin is the only polite shutdown
-  signal available, so the shutdown ladder has one rung fewer than on Unix. See
-  `internal/proxy/terminate_windows.go`.
-- Path canonicalisation for stage 3 has a materially different threat surface
-  here: case-insensitive comparison, `8.3` short names, ADS (`file.txt:evil`),
-  UNC and `\\?\` prefixes, junctions in addition to symlinks. That work is
-  bigger on Windows than on Unix, not smaller.
+## A note on the session log
+
+`~/.mcp-guard/sessions` holds the verbatim content of every tool call and every
+tool result — file contents, API responses, any credential the agent happened to
+read. It is one file per run, restricted to the owning user, and rotated. Treat
+it like a password file and do not paste it into an issue.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

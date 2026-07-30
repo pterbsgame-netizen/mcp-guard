@@ -3,6 +3,11 @@
 # read. Treat them like a password file. Never commit them.
 *.jsonl
 
+# ...except the golden fixture, which is test data rather than a recording.
+# Without this the pattern above swallowed it, and the golden test skipped
+# itself in CI: present, green, and checking nothing.
+!corpus/golden/*.jsonl
+
 # The benign corpus is real recorded traffic and stays out of the repository.
 # The attack corpus is synthetic fixture data and is committed, so it is not
 # ignored here.
@@ -13,6 +18,21 @@
 /dist/
 /mcp-guard
 /mcp-guard.exe
+
+# Working notes, kept on disk and out of the published repository.
+#
+# CLAUDE.md is context for an agent working in this directory. ROADMAP tracks
+# item state against the plan. docs/ holds the original design brief, which is
+# written in Russian and addresses its reader personally — including career
+# plans that were never meant to be public.
+#
+# None of it is secret, all of it is internal, and a repository someone else
+# clones should be the tool rather than the notebook it was built from.
+CLAUDE.md
+ROADMAP.md
+ROADMAP_ru.md
+/docs/
+/.claude/
 
 # Baselines and locks produced by running the tool against this machine.
 #

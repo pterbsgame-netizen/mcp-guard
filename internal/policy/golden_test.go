@@ -84,7 +84,11 @@ func readGoldenInput(t *testing.T) []goldenCase {
 	t.Helper()
 	f, err := os.Open(filepath.FromSlash(goldenInput))
 	if err != nil {
-		t.Skipf("no golden input: %v", err)
+		// Not a skip. A missing fixture once meant this test passed in CI while
+		// checking nothing at all, because .gitignore's *.jsonl had swallowed
+		// the input file. A regression net that disappears quietly is worse
+		// than no net.
+		t.Fatalf("golden input missing: %v", err)
 	}
 	defer f.Close()
 
