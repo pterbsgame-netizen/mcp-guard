@@ -124,13 +124,26 @@ produces zero blocks. First half ✅ (four spellings, end to end). Second half
 
 ## Blocking everything else
 
-- [ ] **Measure the false-positive rate on real traffic.** Every remaining
-      decision waits on this. The corpus has 27 sessions and 2 tool calls,
-      because traffic only reaches it through wrapped MCP servers. All four are
-      now wrapped (`filesystem`, `fetch`, `context7`, `blender`), so this should
-      start moving.
-- [ ] **Turn on `-enforce`.** Not before the number above exists. Switching it
-      on to see what happens is exactly how a tool gets uninstalled.
+- [~] **Measure the false-positive rate on real traffic.** First real numbers,
+      over 53 sessions and 12 tool calls in 54 hours, with one deliberate probe
+      session excluded:
+
+      blocks per week:  0.0 at enforce,  15.4 at strict
+
+      `enforce` has produced no verdict at all on ordinary work. `strict` is
+      fifteen times over the target of one, all of it `execute_blender_code`
+      hitting the exec class — so strict is unusable alongside a Blender
+      workflow until a confirm can be answered rather than refused.
+      Twelve calls is a signal, not a sample.
+- [ ] **Turn on `-enforce`.** The evidence now points that way rather than away,
+      but it rests on twelve calls. Give it a week of ordinary work first.
+- [ ] **Decide what to do about taint not crossing servers.** Found on real
+      traffic and described in `CLAUDE.md`: one proxy per server means one
+      session each, so fetching a poisoned page taints the fetch proxy and the
+      blender proxy never hears about it. The threat model is cross-server by
+      nature, which makes `exec.action_if_tainted` dead code in practice.
+      Sharing state between processes — grouped by parent pid — is a design
+      change with its own false-positive cost, so it waits on the line above.
 
 ## Product, once the above is answered
 

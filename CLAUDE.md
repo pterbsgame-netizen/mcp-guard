@@ -121,6 +121,20 @@ Do not add these without a conversation. Each is a decision, not an oversight.
 - A stdio proxy cannot see what a server process does on its own network
   connections. A server with built-in telemetry exfiltrates without a single
   byte crossing this proxy. That needs sandboxing, which is stage 5.
+- **Taint does not cross servers.** One proxy process per server means one
+  session each, and taint lives in that session. The agent fetches a page
+  through `fetch` — tainting *that* proxy — and then runs code through
+  `blender`, a different process with a clean session. Observed on real
+  traffic: five `execute_blender_code` verdicts, every one `tainted=false`,
+  while the fetch sessions beside them were tainted.
+
+  The threat model is cross-server by nature: read untrusted content with one
+  tool, act with another. So `exec.action_if_tainted` never fires in a real
+  multi-server setup, and the escalation only worked in tests because tests put
+  everything in one session. Sharing taint means shared state between processes
+  — grouping by parent pid would identify proxies belonging to one client — and
+  that is a deliberate design change, not a patch. It will also raise the block
+  rate, so it should not land before enforcement has a track record.
 
 ## Emergency
 
