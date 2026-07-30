@@ -3,6 +3,8 @@
 [![CI](https://github.com/pterbsgame-netizen/mcp-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/pterbsgame-netizen/mcp-guard/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+**[pterbsgame-netizen.github.io/mcp-guard](https://pterbsgame-netizen.github.io/mcp-guard/)** — the same thing with pictures ([по-русски](https://pterbsgame-netizen.github.io/mcp-guard/ru.html))
+
 A security proxy for MCP stdio servers. Your client launches `mcp-guard`,
 `mcp-guard` launches the real server, and everything between them is relayed,
 recorded, and — depending on the level — refused.
