@@ -166,7 +166,7 @@ func loadGuardConfig(lockPath, policyPath, rulesPath string, disabled bool) (...
 $env:Path = "C:\msys64\ucrt64\bin;$env:Path"; $env:CGO_ENABLED = "1"; go test -race ./...
 ```
 
-Живая проверка после сборки: включить `-enforce` в конфиге Claude Desktop, попросить агента записать что-нибудь в `C:\Users\peter\dev`, затем `mcp-guard replay` и `mcp-guard eval --benign ~/.mcp-guard/sessions` — обе строки «блокировок в неделю» должны появиться.
+Живая проверка после сборки: включить `-enforce` в конфиге Claude Desktop, попросить агента записать что-нибудь в `%USERPROFILE%\dev`, затем `mcp-guard replay` и `mcp-guard eval --benign ~/.mcp-guard/sessions` — обе строки «блокировок в неделю» должны появиться.
 
 ## Чего сознательно не делаем
 

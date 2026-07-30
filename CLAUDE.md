@@ -30,26 +30,27 @@ use**, target under one. Anything that raises it needs to justify itself.
 | Session logs | `%USERPROFILE%\.mcp-guard\sessions\` (one file per proxy run) |
 | Client config | `%APPDATA%\Claude\claude_desktop_config.json` |
 
-## Current state, as of 29 July 2026
+## Current state, as of 30 July 2026
 
-Stages 0–4 of the plan are done, with two loose ends in stage 3. CI is green on
-Windows and Linux. `ROADMAP.md` tracks every item; check it before assuming
-something is finished.
+Stages 0–4 of the plan are done. CI is green on Windows and Linux. `ROADMAP.md`
+tracks every item; check it before assuming something is finished.
 
-- Running in **observe** mode on this machine, wrapping all four configured
-  servers: `filesystem` (scoped to `C:\Users\peter\dev`) and `fetch` from
-  `claude_desktop_config.json`, `context7` and `blender` from `~/.claude.json`.
-- **`-enforce` is deliberately off.** Not because it does not work — it is
-  tested — but because the false-positive rate has never been measured on real
-  traffic. Do not switch it on to "see what happens".
-- The benign corpus is **effectively empty**: 27 sessions but only 2 tool calls.
-  Traffic reaches the corpus only through a wrapped MCP server; built-in file
-  tools bypass the proxy entirely, so a day of heavy editing can leave it at
-  zero. `mcp-guard eval --benign` prints the call count next to the rate for
-  exactly this reason — a zero over two calls is not a rate.
-- `blender` exposes `execute_blender_code`, which is the first tool in this
-  configuration that the policy rates anything other than `allow`: exec class,
-  `confirm` clean and `deny` once tainted. Nothing has exercised that path yet.
+- Running at **`enforce`** on the development machine, wrapping four servers:
+  `filesystem` and `fetch` from `claude_desktop_config.json`, `context7` and
+  `blender` from `~/.claude.json`.
+- It was switched on only after the number said so: **28 tool calls of ordinary
+  work over two days, zero blocks.** Deliberate probes are excluded from that
+  count via `corpus/excluded-sessions.txt`, and including them gives 11.1 blocks
+  per week — four correct refusals of attacks, which is the measurement working
+  rather than friction to be tuned away.
+- **`strict` is not usable here**, and not because of a bad rule. It refuses
+  `confirm` as well, and `execute_blender_code` is exec class, so a Blender
+  workflow alone produces around 30 refusals a week. That does not improve with
+  more data; it improves when a confirm can be answered instead of refused.
+- The corpus only grows through a wrapped MCP server. Built-in file tools bypass
+  the proxy entirely, so a day of heavy editing can leave it at zero.
+  `mcp-guard eval --benign` prints the call count beside the rate for exactly
+  that reason — a zero over two calls is not a rate.
 
 ## Build and test
 
