@@ -34,6 +34,12 @@ ROADMAP_ru.md
 /docs/
 /.claude/
 
+# The landing page and its little local server. It describes the project and
+# links back here, so keeping it in the repository it points at buys nothing:
+# nothing publishes it from here, and a clone would just get a second copy of
+# the README with markup around it.
+/site/
+
 # Baselines and locks produced by running the tool against this machine.
 #
 # This is not advice to leave yours uncommitted - the whole point of a lock file
