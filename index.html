@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="mcp-guard - a proxy between an MCP client and an MCP stdio server. It decides on what a call does, not on how it is worded.">
+<meta name="description" content="effectgate - a proxy between an MCP client and an MCP stdio server. It decides on what a call does, not on how it is worded.">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="ru" href="ru.html">
 <style>
@@ -13,7 +13,7 @@
   svg { display: block; }
   img { display: block; max-width: 100%; }
 </style>
-<title>mcp-guard</title>
+<title>effectgate</title>
 
 <style>
   :root {
@@ -505,7 +505,7 @@
       <a class="lang" href="ru.html" hreflang="ru" lang="ru">Русский</a>
     </p>
 
-    <h1>mcp<span class="dash">-</span>guard</h1>
+    <h1>effect<span class="dash">gate</span></h1>
 
     <p class="lede">
       A proxy between an MCP client and an MCP server. It records every message and refuses
@@ -513,17 +513,17 @@
     </p>
 
     <div class="actions">
-      <a class="cta" href="https://github.com/pterbsgame-netizen/mcp-guard">
+      <a class="cta" href="https://github.com/pterbsgame-netizen/effectgate">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.07-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.15 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
         Repository on GitHub
       </a>
-      <a class="cta cta-ghost" href="https://github.com/pterbsgame-netizen/mcp-guard/releases">Download v0.1.0</a>
+      <a class="cta cta-ghost" href="https://github.com/pterbsgame-netizen/effectgate/releases">Download v0.1.0</a>
     </div>
 
     <div class="pipe">
       <div class="pipe-head">
         <span>client</span>
-        <span class="mid">mcp-guard</span>
+        <span class="mid">effectgate</span>
         <span class="end-r">server</span>
       </div>
       <div class="pipe-body">
@@ -677,23 +677,23 @@
     <h2>What you actually do with it</h2>
     <div class="cmds">
       <div class="cmd">
-        <code><span class="k">mcp-guard</span> -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp</code>
+        <code><span class="k">effectgate</span> -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp</code>
         <p>Starts the real server, relays stdin/stdout/stderr unchanged, and writes one JSON object per message. One file per run: a client keeps one proxy per server, and a shared file turns rotation into a race between processes.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard approve</span> -- …&nbsp;&nbsp;→&nbsp;&nbsp;mcp-guard.lock</code>
+        <code><span class="k">effectgate approve</span> -- …&nbsp;&nbsp;→&nbsp;&nbsp;effectgate.lock</code>
         <p>Records the name, description and canonicalised schema of every tool. Commit the file: a server that later rewrites a description or widens a schema shows up in a diff during review, which is where it should be noticed. <code>--diff</code> exits non-zero and fits into a build.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard verify</span> · <span class="k">watch</span></code>
+        <code><span class="k">effectgate verify</span> · <span class="k">watch</span></code>
         <p>The proxy is a line in the same configuration file it would be guarding, so this part lives outside the traffic path. Only server declarations are recorded, never whole files: clients keep caches and window positions in them and rewrite them constantly. Environment variable names, yes; values, never.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard replay</span></code>
+        <code><span class="k">effectgate replay</span></code>
         <p>A readable transcript of a session: directions, methods, which reply answered which request and how long it took, the target tool of every <code>tools/call</code>. Offline and deterministic — no server is started, so the same log always produces the same text.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard eval</span> --attack corpus/attack --benign ~/.mcp-guard/sessions</code>
+        <code><span class="k">effectgate eval</span> --attack corpus/attack --benign ~/.effectgate/sessions</code>
         <p>Recall on the attack corpus and false positives on real traffic. The headline "blocks per week" refuses to be computed over less than an hour of elapsed time — a rate measured over four calls is not a rate.</p>
       </div>
     </div>
@@ -734,12 +734,12 @@
     <p class="kicker">install</p>
     <h2>One binary and one line of config</h2>
     <p>
-      Take a binary from the <a href="https://github.com/pterbsgame-netizen/mcp-guard/releases">releases page</a>
+      Take a binary from the <a href="https://github.com/pterbsgame-netizen/effectgate/releases">releases page</a>
       and check it against <code>SHA256SUMS.txt</code>, or build it yourself. Dependencies outside
       the standard library: <code>golang.org/x/sys</code>, <code>fsnotify</code>,
       <code>yaml.v3</code>.
     </p>
-<pre>go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest</pre>
+<pre>go install github.com/pterbsgame-netizen/effectgate/cmd/effectgate@latest</pre>
     <p>
       Then put it in front of the servers you already run. <code>install</code> finds the client
       configs on this machine, prints what it would change, and writes nothing until you drop
@@ -747,18 +747,18 @@
       those files comes out byte for byte identical — and <code>uninstall</code> reads the original
       commands back out of the wrapped ones.
     </p>
-<pre>mcp-guard install --dry-run
-mcp-guard install
-mcp-guard uninstall</pre>
+<pre>effectgate install --dry-run
+effectgate install
+effectgate uninstall</pre>
     <p>
-      By hand it is the same edit, once: the server command is replaced by <code>mcp-guard</code>
+      By hand it is the same edit, once: the server command is replaced by <code>effectgate</code>
       plus the original command. For Claude Desktop that file is
       <code>%APPDATA%\Claude\claude_desktop_config.json</code>:
     </p>
 <pre>{
   <span class="k">"mcpServers"</span>: {
     <span class="k">"filesystem"</span>: {
-      <span class="k">"command"</span>: <span class="s">"C:\\tools\\mcp-guard.exe"</span>,
+      <span class="k">"command"</span>: <span class="s">"C:\\tools\\effectgate.exe"</span>,
       <span class="k">"args"</span>: [
         <span class="s">"--policy"</span>, <span class="s">"default"</span>,
         <span class="s">"--"</span>,
@@ -772,7 +772,7 @@ mcp-guard uninstall</pre>
       the same calls, the same errors — and the session turns up in the log.
     </p>
     <p class="caveat">
-      <b>If something goes wrong:</b> <code>MCPGUARD_OFF=1</code> in the client's environment and
+      <b>If something goes wrong:</b> <code>EFFECTGATE_OFF=1</code> in the client's environment and
       the relay runs with no checks at all. The variable is read before any configuration file is
       opened, so a typo in a policy cannot cost the user their tools. The log keeps being written
       and marks <code>from: "off"</code>, so an unguarded session is still recognisable afterwards.
@@ -786,9 +786,9 @@ mcp-guard uninstall</pre>
       <span>stdio only</span>
       <span>v0.1.0</span>
     </p>
-    <a class="cta" href="https://github.com/pterbsgame-netizen/mcp-guard">
+    <a class="cta" href="https://github.com/pterbsgame-netizen/effectgate">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.07-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.15 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-      pterbsgame-netizen/mcp-guard
+      pterbsgame-netizen/effectgate
     </a>
   </footer>
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<meta name="description" content="mcp-guard - прокси между MCP-клиентом и MCP stdio-сервером. Решает по эффекту вызова, а не по его содержимому.">
+<meta name="description" content="effectgate - прокси между MCP-клиентом и MCP stdio-сервером. Решает по эффекту вызова, а не по его содержимому.">
 <link rel="alternate" hreflang="en" href="index.html">
 <link rel="alternate" hreflang="ru" href="ru.html">
 <style>
@@ -13,7 +13,7 @@
   svg { display: block; }
   img { display: block; max-width: 100%; }
 </style>
-<title>mcp-guard</title>
+<title>effectgate</title>
 
 <style>
   :root {
@@ -505,7 +505,7 @@
       <a class="lang" href="index.html" hreflang="en" lang="en">English</a>
     </p>
 
-    <h1>mcp<span class="dash">-</span>guard</h1>
+    <h1>effect<span class="dash">gate</span></h1>
 
     <p class="lede">
       Прокси между MCP-клиентом и MCP-сервером. Записывает каждое сообщение и отказывает
@@ -513,17 +513,17 @@
     </p>
 
     <div class="actions">
-      <a class="cta" href="https://github.com/pterbsgame-netizen/mcp-guard">
+      <a class="cta" href="https://github.com/pterbsgame-netizen/effectgate">
         <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.07-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.15 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
         Репозиторий на GitHub
       </a>
-      <a class="cta cta-ghost" href="https://github.com/pterbsgame-netizen/mcp-guard/releases">Скачать v0.1.0</a>
+      <a class="cta cta-ghost" href="https://github.com/pterbsgame-netizen/effectgate/releases">Скачать v0.1.0</a>
     </div>
 
     <div class="pipe">
       <div class="pipe-head">
         <span>клиент</span>
-        <span class="mid">mcp-guard</span>
+        <span class="mid">effectgate</span>
         <span class="end-r">сервер</span>
       </div>
       <div class="pipe-body">
@@ -676,23 +676,23 @@
     <h2>Что с этим делают</h2>
     <div class="cmds">
       <div class="cmd">
-        <code><span class="k">mcp-guard</span> -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp</code>
+        <code><span class="k">effectgate</span> -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp</code>
         <p>Запускает настоящий сервер, передаёт stdin/stdout/stderr без изменений и пишет по одному JSON-объекту на сообщение. Свой файл на каждый запуск: клиент держит по прокси на сервер, и общий файл превращает ротацию в гонку процессов.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard approve</span> -- …&nbsp;&nbsp;→&nbsp;&nbsp;mcp-guard.lock</code>
+        <code><span class="k">effectgate approve</span> -- …&nbsp;&nbsp;→&nbsp;&nbsp;effectgate.lock</code>
         <p>Записывает имя, описание и канонизированную схему каждого инструмента. Файл коммитится: сервер, который позже переписал описание или расширил схему, появляется в diff во время review — там, где это и надо замечать. <code>--diff</code> выходит с ненулевым кодом и годится для сборки.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard verify</span> · <span class="k">watch</span></code>
+        <code><span class="k">effectgate verify</span> · <span class="k">watch</span></code>
         <p>Прокси — это строка в том же файле конфигурации, который он охраняет, поэтому эта часть живёт вне пути трафика. Записываются только объявления серверов, никогда файлы целиком: клиенты держат в них кеши и позиции окон и перезаписывают их постоянно. Имена переменных окружения — да, значения — никогда.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard replay</span></code>
+        <code><span class="k">effectgate replay</span></code>
         <p>Читаемая расшифровка сессии: направления, методы, какой ответ на какой запрос и за сколько, целевой инструмент каждого <code>tools/call</code>. Офлайн и детерминированно — сервер не запускается, один и тот же лог всегда даёт один и тот же текст.</p>
       </div>
       <div class="cmd">
-        <code><span class="k">mcp-guard eval</span> --attack corpus/attack --benign ~/.mcp-guard/sessions</code>
+        <code><span class="k">effectgate eval</span> --attack corpus/attack --benign ~/.effectgate/sessions</code>
         <p>Recall на корпусе атак и ложные срабатывания на настоящем трафике. Заголовочная «блокировок в неделю» отказывается считаться меньше чем по часу прошедшего времени — ставка, посчитанная по четырём вызовам, не ставка.</p>
       </div>
     </div>
@@ -733,12 +733,12 @@
     <p class="kicker">установка</p>
     <h2>Один бинарник и одна строка в конфиге</h2>
     <p>
-      Готовый бинарник — на <a href="https://github.com/pterbsgame-netizen/mcp-guard/releases">странице релизов</a>,
+      Готовый бинарник — на <a href="https://github.com/pterbsgame-netizen/effectgate/releases">странице релизов</a>,
       рядом лежит <code>SHA256SUMS.txt</code> для проверки. Либо собрать самому. Зависимости за
       пределами стандартной библиотеки: <code>golang.org/x/sys</code>, <code>fsnotify</code>,
       <code>yaml.v3</code>.
     </p>
-<pre>go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest</pre>
+<pre>go install github.com/pterbsgame-netizen/effectgate/cmd/effectgate@latest</pre>
     <p>
       Дальше — поставить его перед серверами, которые уже запущены. <code>install</code> находит
       конфиги клиентов на этой машине, печатает, что собирается изменить, и не пишет ничего, пока
@@ -746,18 +746,18 @@
       остальное в этих файлах остаётся байт в байт, — а <code>uninstall</code> достаёт исходные
       команды из обёрнутых.
     </p>
-<pre>mcp-guard install --dry-run
-mcp-guard install
-mcp-guard uninstall</pre>
+<pre>effectgate install --dry-run
+effectgate install
+effectgate uninstall</pre>
     <p>
-      Вручную это та же правка, один раз: команду сервера заменяют на <code>mcp-guard</code> плюс
+      Вручную это та же правка, один раз: команду сервера заменяют на <code>effectgate</code> плюс
       исходную команду. Для Claude Desktop это
       <code>%APPDATA%\Claude\claude_desktop_config.json</code>:
     </p>
 <pre>{
   <span class="k">"mcpServers"</span>: {
     <span class="k">"filesystem"</span>: {
-      <span class="k">"command"</span>: <span class="s">"C:\\tools\\mcp-guard.exe"</span>,
+      <span class="k">"command"</span>: <span class="s">"C:\\tools\\effectgate.exe"</span>,
       <span class="k">"args"</span>: [
         <span class="s">"--policy"</span>, <span class="s">"default"</span>,
         <span class="s">"--"</span>,
@@ -771,7 +771,7 @@ mcp-guard uninstall</pre>
       те же вызовы, те же ошибки — и сессия оказывается в логе.
     </p>
     <p class="caveat">
-      <b>Если что-то пошло не так:</b> <code>MCPGUARD_OFF=1</code> в окружении клиента — и
+      <b>Если что-то пошло не так:</b> <code>EFFECTGATE_OFF=1</code> в окружении клиента — и
       передача идёт вообще без проверок. Переменная читается раньше, чем открывается любой файл
       конфигурации, поэтому опечатка в политике не может стоить пользователю его инструментов.
       Лог при этом продолжает писаться и отмечает <code>from: "off"</code>, так что незащищённую
@@ -786,9 +786,9 @@ mcp-guard uninstall</pre>
       <span>только stdio</span>
       <span>v0.1.0</span>
     </p>
-    <a class="cta" href="https://github.com/pterbsgame-netizen/mcp-guard">
+    <a class="cta" href="https://github.com/pterbsgame-netizen/effectgate">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.07-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.15 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-      pterbsgame-netizen/mcp-guard
+      pterbsgame-netizen/effectgate
     </a>
   </footer>
 
