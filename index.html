@@ -650,24 +650,25 @@
     <p class="kicker">numbers, not promises</p>
     <h2>The metric that decides the project is blocks per week</h2>
     <div class="stats">
-      <div class="stat"><b>28</b><span>tool calls of ordinary work over two days</span></div>
+      <div class="stat"><b>28</b><span>tool calls of ordinary work over 75 hours</span></div>
       <div class="stat is-good"><b>0</b><span>blocks at <code>enforce</code> in that period</span></div>
-      <div class="stat"><b>4</b><span>correct refusals of deliberate probes<br>(excluded from the count on the left)</span></div>
-      <div class="stat is-bad"><b>≈30</b><span>refusals per week at <code>strict</code> - the target is under one</span></div>
+      <div class="stat"><b>5</b><span>correct refusals of deliberate probes<br>(excluded from the count on the left)</span></div>
+      <div class="stat is-bad"><b>24.5</b><span>refusals per week at <code>strict</code> - the target is under one</span></div>
     </div>
     <div class="cols">
       <p class="caveat">
         <b><code>strict</code> is not used here</b> — and not because of a bad rule. It refuses
         <code>confirm</code> as well, and <code>execute_blender_code</code> falls in the
-        <code>exec</code> class, so a single Blender workflow produces around thirty refusals a
-        week. More data does not fix that; being able to answer a confirm instead of refusing it
-        does.
+        <code>exec</code> class, so a single Blender workflow accounts for every one of those
+        24.5 refusals. More data does not fix that; being able to answer a confirm instead of
+        refusing it does.
       </p>
       <p class="caveat">
-        <b>100% recall on six published attack scenarios</b> — and that is the easiest number here.
-        Every rule was written after reading them, so it proves the rules match their own examples,
-        not that they generalise. The false positive rate on real traffic is the one you cannot
-        manufacture, which is why <code>eval</code> prints the number of calls next to the rate.
+        <b>Every figure here comes out of <code>effectgate eval --benign</code></b>, over 28 calls
+        covering 75 hours, so it can be checked rather than believed — and if this page ever
+        disagrees with that command, the command is right. Recall on the published attack
+        scenarios is 100%, and that is the easiest number of the set: the rules were written after
+        reading them, so it shows they match their own examples, not that they generalise.
       </p>
     </div>
   </section>
