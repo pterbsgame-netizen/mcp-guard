@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/pterbsgame-netizen/effectgate/internal/policy"
@@ -126,4 +127,35 @@ func equal(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// TestBuildVersionPrefersTheStamp: a release build passes -X main.version, and
+// nothing worked out at runtime may override what the release says it is.
+func TestBuildVersionPrefersTheStamp(t *testing.T) {
+	defer func(old string) { version = old }(version)
+	version = "v9.9.9"
+	if got := buildVersion(); got != "v9.9.9" {
+		t.Errorf("buildVersion() = %q, want the stamp", got)
+	}
+}
+
+// TestUnstampedBuildStillAnswers covers the case that made this function
+// necessary: `go install` passes no ldflags, and the version subcommand still
+// has to answer with something a bug report can be filed against.
+//
+// What it cannot assert is that the answer is not a release number. Go derives
+// one from the nearest tag for working-tree builds - this repository builds as
+// "v0.2.0+dirty" - so a leading "v" is honest rather than invented, and an
+// assertion against it would encode a rule that is not true.
+func TestUnstampedBuildStillAnswers(t *testing.T) {
+	defer func(old string) { version = old }(version)
+	version = ""
+
+	got := buildVersion()
+	if got == "" {
+		t.Fatal("buildVersion() returned nothing")
+	}
+	if strings.TrimSpace(got) != got {
+		t.Errorf("buildVersion() = %q, which would misalign every line it prints in", got)
+	}
 }

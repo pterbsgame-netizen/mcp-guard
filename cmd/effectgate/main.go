@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -50,21 +51,64 @@ examples:
 flags:
 `
 
-// version is stamped at build time:
+// version is stamped into release builds:
 //
-//	go build -ldflags "-X main.version=v0.1.0" ./cmd/effectgate
+//	go build -ldflags "-X main.version=v0.2.0" ./cmd/effectgate
 //
-// A security tool that cannot say which build it is makes every bug report a
-// guess, so the default says plainly that it was not stamped rather than
-// inventing a number.
-var version = "dev (unstamped)"
+// Left empty it is worked out at runtime instead. A security tool that cannot
+// say which build it is makes every bug report a guess, and the release build
+// is not the only one people run.
+var version string
+
+// buildVersion answers "which build is this" for every way the binary can be
+// produced, and never invents a number for any of them.
+func buildVersion() string {
+	if version != "" {
+		return version
+	}
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "dev (unstamped)"
+	}
+	// `go install module/cmd@v0.2.0` records the module version here and passes
+	// no ldflags. That is the path the README and the site both recommend, so
+	// without this the most common install reports itself as an unknown build.
+	//
+	// A recent toolchain also fills this in for working-tree builds, deriving
+	// it from the nearest tag and appending +dirty - which is more useful than
+	// anything below, so it is taken first.
+	if v := bi.Main.Version; v != "" && v != "(devel)" {
+		return v
+	}
+	// Older toolchains, and builds with -buildvcs=false, leave the above empty.
+	// The commit is more use in a bug report than the word "dev", and whether
+	// the tree was dirty decides whether the commit means anything at all.
+	var rev, dirty string
+	for _, s := range bi.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = "-dirty"
+			}
+		}
+	}
+	if rev == "" {
+		return "dev (unstamped)"
+	}
+	return "dev+" + rev + dirty
+}
 
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-version":
 			fmt.Printf("effectgate %s %s/%s %s\n",
-				version, runtime.GOOS, runtime.GOARCH, runtime.Version())
+				buildVersion(), runtime.GOOS, runtime.GOARCH, runtime.Version())
 			return
 		case "replay":
 			os.Exit(runReplay(os.Args[2:]))
