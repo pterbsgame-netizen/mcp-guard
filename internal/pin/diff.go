@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/canon"
+	"github.com/pterbsgame-netizen/effectgate/internal/canon"
 )
 
 // Kind is what sort of difference was found.

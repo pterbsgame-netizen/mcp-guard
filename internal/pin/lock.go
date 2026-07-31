@@ -19,15 +19,15 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/canon"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/canon"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
 )
 
 // Version is the lock file format version.
 const Version = 1
 
 // DefaultName is the conventional file name, alongside the project it covers.
-const DefaultName = "mcp-guard.lock"
+const DefaultName = "effectgate.lock"
 
 // Lock is the approved state of one MCP server.
 type Lock struct {

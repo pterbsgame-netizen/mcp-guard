@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/canon"
+	"github.com/pterbsgame-netizen/effectgate/internal/canon"
 )
 
 // Version is the baseline file format version.
@@ -19,7 +19,7 @@ const Version = 1
 //
 // It belongs in a project repository, not beside the configs it describes: a
 // baseline stored next to what it guards is editable by whoever edits that.
-const DefaultBaselineName = "mcp-guard.configs.lock"
+const DefaultBaselineName = "effectgate.configs.lock"
 
 // Baseline is the approved state of the client configs.
 type Baseline struct {

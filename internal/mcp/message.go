@@ -272,7 +272,7 @@ func idOrNull(id ID) json.RawMessage {
 func quote(s string) []byte {
 	enc, err := json.Marshal(s)
 	if err != nil {
-		return []byte(`"blocked by mcp-guard"`)
+		return []byte(`"blocked by effectgate"`)
 	}
 	return enc
 }

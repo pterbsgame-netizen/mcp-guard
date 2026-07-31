@@ -143,7 +143,7 @@ func TestOrdinaryContentScoresLow(t *testing.T) {
 	rs := Default()
 	samples := []struct{ name, text string }{
 		{"go source", "func main() {\n\tif err := run(); err != nil {\n\t\tlog.Fatal(err)\n\t}\n}"},
-		{"readme", "## Install\n\nDownload the binary and add it to your PATH. Run `mcp-guard --help` for usage."},
+		{"readme", "## Install\n\nDownload the binary and add it to your PATH. Run `effectgate --help` for usage."},
 		{"changelog", "- Fixed a crash when the config file was missing\n- Added a --verbose flag"},
 		{"code review comment", "This ignores the previous value on purpose; see the comment above."},
 		{"http response", `{"status":"ok","items":[{"id":1,"name":"widget"}],"next":"https://api.example/v2/items?page=2"}`},

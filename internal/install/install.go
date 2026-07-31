@@ -1,4 +1,4 @@
-// Package install wires mcp-guard into the client configuration files that
+// Package install wires effectgate into the client configuration files that
 // launch MCP servers, and takes it back out again.
 //
 // The file is never re-serialised as a whole. Client configs keep caches,
@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/canon"
+	"github.com/pterbsgame-netizen/effectgate/internal/canon"
 )
 
 // Kind is what happened, or would happen, to one server declaration.
@@ -93,7 +93,7 @@ func contains(s []string, v string) bool {
 // without writing anything.
 func PlanInstall(paths []string, o Options) (*Result, error) {
 	if o.Guard == "" {
-		return nil, errors.New("install: no path to the mcp-guard binary")
+		return nil, errors.New("install: no path to the effectgate binary")
 	}
 	return plan(paths, func(decl []byte) ([]byte, Kind, string, string, string) {
 		return wrap(decl, o)
@@ -171,7 +171,7 @@ func copyAside(path string) (string, error) {
 	// Timestamped rather than a single .bak: the second run of this command
 	// would otherwise overwrite the copy of the file as it was before the
 	// first, which is the copy anyone would actually want back.
-	dst := path + ".mcp-guard-backup." + time.Now().Format("20060102-150405")
+	dst := path + ".effectgate-backup." + time.Now().Format("20060102-150405")
 	return dst, os.WriteFile(dst, raw, 0o600)
 }
 
@@ -583,9 +583,9 @@ func isGuard(command string) bool {
 	base := filepath.Base(filepath.FromSlash(command))
 	base = strings.TrimSuffix(base, filepath.Ext(base))
 	if runtime.GOOS == "windows" {
-		return strings.EqualFold(base, "mcp-guard")
+		return strings.EqualFold(base, "effectgate")
 	}
-	return base == "mcp-guard"
+	return base == "effectgate"
 }
 
 func summary(command string, args []string) string {

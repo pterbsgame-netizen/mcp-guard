@@ -60,7 +60,7 @@ func TestSpellingsOfOneFile(t *testing.T) {
 // TestUnsetVariablesAreLeftAlone: blanking an unknown variable invents a path.
 // $NOPE/.ssh must not become /.ssh, which is a file nobody asked about.
 func TestUnsetVariablesAreLeftAlone(t *testing.T) {
-	const unset = "MCPGUARD_DEFINITELY_NOT_SET"
+	const unset = "EFFECTGATE_DEFINITELY_NOT_SET"
 	os.Unsetenv(unset)
 
 	input := "$" + unset + "/x"

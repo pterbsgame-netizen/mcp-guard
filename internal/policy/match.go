@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/fspath"
+	"github.com/pterbsgame-netizen/effectgate/internal/fspath"
 )
 
 // A pattern names a set of paths. Three forms are supported, and no more:

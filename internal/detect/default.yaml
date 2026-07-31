@@ -1,4 +1,4 @@
-# mcp-guard content signatures.
+# effectgate content signatures.
 #
 # These never block anything. A match raises the score; a score at or above the
 # threshold marks the session as having taken in untrusted content, which makes
@@ -62,7 +62,7 @@ rules:
   - id: agent-config-write
     description: Instructing the agent to edit the files that configure it.
     weight: 3
-    pattern: '\b(?:write|edit|modify|append|add)\b[\s\S]{0,80}\b(?:mcp\.json|claude_desktop_config\.json|\.cursor/|\.claude/|mcp-guard\.(?:lock|policy\.yaml))'
+    pattern: '\b(?:write|edit|modify|append|add)\b[\s\S]{0,80}\b(?:mcp\.json|claude_desktop_config\.json|\.cursor/|\.claude/|effectgate\.(?:lock|policy\.yaml))'
 
   - id: tool-directive
     description: Text steering the agent towards a specific tool call.

@@ -15,7 +15,7 @@ import (
 const desktopConfig = `{
   "mcpServers": {
     "filesystem": {
-      "command": "mcp-guard.exe",
+      "command": "effectgate.exe",
       "args": ["--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\dev"],
       "env": {"GITHUB_TOKEN": "ghp_realsecretvalue"}
     }
@@ -49,7 +49,7 @@ func TestLoadExtractsServers(t *testing.T) {
 	if s.Name != "filesystem" {
 		t.Errorf("name = %q, want filesystem", s.Name)
 	}
-	if s.Command != "mcp-guard.exe" {
+	if s.Command != "effectgate.exe" {
 		t.Errorf("command = %q", s.Command)
 	}
 	if len(s.EnvKeys) != 1 || s.EnvKeys[0] != "GITHUB_TOKEN" {
@@ -138,7 +138,7 @@ func TestApplicationNoiseIsNotAChange(t *testing.T) {
 	    "filesystem": {
 	      "env": {"GITHUB_TOKEN": "ghp_rotatedvalue"},
 	      "args": ["--", "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\dev"],
-	      "command": "mcp-guard.exe"
+	      "command": "effectgate.exe"
 	    }
 	  }
 	}`
@@ -207,7 +207,7 @@ func TestConfigRewriteIsCaught(t *testing.T) {
 	if !strings.Contains(out, "evil.example") {
 		t.Errorf("the report did not show what the new server runs:\n%s", out)
 	}
-	if !strings.Contains(out, "mcp-guard.exe") {
+	if !strings.Contains(out, "effectgate.exe") {
 		t.Errorf("the report did not show what the changed server used to run:\n%s", out)
 	}
 }

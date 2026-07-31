@@ -11,7 +11,7 @@
 {"case":"git hook","tool":"write_file","args":{"path":"~/dev/project/.git/hooks/pre-commit","content":"x"}}
 {"case":"dotenv by traversal","tool":"write_file","args":{"path":"~/dev/project/docs/../.env","content":"x"}}
 {"case":"relative dotenv, cwd unknown","tool":"read_text_file","args":{"path":"config/.env"}}
-{"case":"the guard's own policy","tool":"write_file","args":{"path":"~/dev/project/mcp-guard.policy.yaml","content":"x"}}
+{"case":"the guard's own policy","tool":"write_file","args":{"path":"~/dev/project/effectgate.policy.yaml","content":"x"}}
 {"case":"destination is what matters","tool":"move_file","args":{"source":"~/dev/notes.txt","destination":"~/.ssh/authorized_keys"}}
 {"case":"nested under an unfamiliar argument name","tool":"batch_write","args":{"operations":[{"target":"~/dev/a.txt"},{"target":"~/.gnupg/secring.gpg"}]}}
 {"case":"package manifest","tool":"write_file","args":{"path":"~/dev/project/package.json","content":"{}"}}

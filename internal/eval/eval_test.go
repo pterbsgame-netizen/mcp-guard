@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/detect"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/detect"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
 // TestAttackCorpus runs the signatures over the committed attack corpus. It is

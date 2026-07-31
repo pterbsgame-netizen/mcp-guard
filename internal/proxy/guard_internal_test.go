@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/pin"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
 func testGuard(t *testing.T, o Options) *guard {

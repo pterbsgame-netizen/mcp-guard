@@ -5,11 +5,11 @@ import (
 	"io"
 	"testing"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
 // TestKillSwitchIsAffirmativeOnly: a variable named like this invites
-// MCPGUARD_OFF=0, and a guard that disarms itself on being told "off is false"
+// EFFECTGATE_OFF=0, and a guard that disarms itself on being told "off is false"
 // is worse than one with no switch at all.
 func TestKillSwitchIsAffirmativeOnly(t *testing.T) {
 	on := []string{"1", "true", "TRUE", "yes", "on", " on "}

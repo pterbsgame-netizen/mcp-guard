@@ -135,8 +135,8 @@ func TestDenySet(t *testing.T) {
 		filepath.Join(home, "AppData", "Roaming", "Claude", "claude_desktop_config.json"),
 		// The guard's own files: an agent that can rewrite the policy has no
 		// policy.
-		filepath.Join(home, "dev", "project", "mcp-guard.lock"),
-		filepath.Join(home, "dev", "project", "mcp-guard.policy.yaml"),
+		filepath.Join(home, "dev", "project", "effectgate.lock"),
+		filepath.Join(home, "dev", "project", "effectgate.policy.yaml"),
 	}
 	for _, path := range denied {
 		v := p.Decide(Call{Tool: "write_file", Args: args(t, map[string]any{"path": path})}, false)

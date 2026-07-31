@@ -13,11 +13,11 @@
 # ignored here.
 /corpus/benign/
 
-# Build output. Anchored with a leading slash: an unanchored "mcp-guard" also
-# matches the cmd/mcp-guard/ directory and silently drops the entry point.
+# Build output. Anchored with a leading slash: an unanchored "effectgate" also
+# matches the cmd/effectgate/ directory and silently drops the entry point.
 /dist/
-/mcp-guard
-/mcp-guard.exe
+/effectgate
+/effectgate.exe
 
 # Working notes, kept on disk and out of the published repository.
 #
@@ -51,5 +51,5 @@ ROADMAP_ru.md
 #
 # Anything generated here is the second kind, produced while testing, so it is
 # ignored rather than published.
-/mcp-guard.configs.lock
-/mcp-guard.lock
+/effectgate.configs.lock
+/effectgate.lock

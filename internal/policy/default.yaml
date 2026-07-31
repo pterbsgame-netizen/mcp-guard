@@ -1,4 +1,4 @@
-# mcp-guard default policy.
+# effectgate default policy.
 #
 # Decisions are about effects, never about wording. A rule here says "this file
 # is not to be touched", not "this text looks suspicious".
@@ -39,9 +39,9 @@ paths:
     - "**/.cursor/**"
     - "**/.claude/**"
     - "**/claude_desktop_config.json"
-    - "**/mcp-guard.lock"
-    - "**/mcp-guard.policy.yaml"
-    - "**/mcp-guard.configs.lock"
+    - "**/effectgate.lock"
+    - "**/effectgate.policy.yaml"
+    - "**/effectgate.configs.lock"
 
     # Shell startup files: a write here runs next time a terminal opens.
     - "~/.bashrc"

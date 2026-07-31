@@ -8,20 +8,20 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/cfg"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/install"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/cfg"
+	"github.com/pterbsgame-netizen/effectgate/internal/install"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
-const installUsage = `mcp-guard install - put mcp-guard in front of every stdio server a client launches.
+const installUsage = `effectgate install - put effectgate in front of every stdio server a client launches.
 
 usage:
-  mcp-guard install [flags] [config-file...]
-  mcp-guard uninstall [flags] [config-file...]
+  effectgate install [flags] [config-file...]
+  effectgate uninstall [flags] [config-file...]
 
-  mcp-guard install --dry-run
-  mcp-guard install
-  mcp-guard uninstall
+  effectgate install --dry-run
+  effectgate install
+  effectgate uninstall
 
 With no files named, the client configs found on this machine are used. Every
 file is copied aside before it is written, and uninstall puts the original
@@ -55,7 +55,7 @@ func runInstall(args []string, undo bool) int {
 		paths = cfg.Discover()
 	}
 	if len(paths) == 0 {
-		fmt.Fprintln(os.Stderr, "mcp-guard: no client configs found; name them explicitly")
+		fmt.Fprintln(os.Stderr, "effectgate: no client configs found; name them explicitly")
 		return 1
 	}
 
@@ -70,7 +70,7 @@ func runInstall(args []string, undo bool) int {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
@@ -93,14 +93,14 @@ func runInstall(args []string, undo bool) int {
 		fmt.Fprintln(os.Stdout)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
 	fmt.Fprintf(os.Stdout, "\nwrote %d file(s). Restart the client for it to take effect.\n", len(result.Files()))
 	if !undo {
-		fmt.Fprintln(os.Stdout, "If anything breaks, MCPGUARD_OFF=1 in the client's environment relays with no checks,")
-		fmt.Fprintln(os.Stdout, "and `mcp-guard uninstall` puts the original commands back.")
+		fmt.Fprintln(os.Stdout, "If anything breaks, EFFECTGATE_OFF=1 in the client's environment relays with no checks,")
+		fmt.Fprintln(os.Stdout, "and `effectgate uninstall` puts the original commands back.")
 	}
 	return 0
 }

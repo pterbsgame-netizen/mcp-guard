@@ -23,9 +23,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/detect"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/detect"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
 const maxLogLine = 64 << 20

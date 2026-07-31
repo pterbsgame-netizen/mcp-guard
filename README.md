@@ -1,18 +1,18 @@
-# mcp-guard
+# effectgate
 
-[![CI](https://github.com/pterbsgame-netizen/mcp-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/pterbsgame-netizen/mcp-guard/actions/workflows/ci.yml)
+[![CI](https://github.com/pterbsgame-netizen/effectgate/actions/workflows/ci.yml/badge.svg)](https://github.com/pterbsgame-netizen/effectgate/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**[pterbsgame-netizen.github.io/mcp-guard](https://pterbsgame-netizen.github.io/mcp-guard/)** — the same thing with pictures ([по-русски](https://pterbsgame-netizen.github.io/mcp-guard/ru.html))
+**[pterbsgame-netizen.github.io/effectgate](https://pterbsgame-netizen.github.io/effectgate/)** — the same thing with pictures ([по-русски](https://pterbsgame-netizen.github.io/effectgate/ru.html))
 
-A security proxy for MCP stdio servers. Your client launches `mcp-guard`,
-`mcp-guard` launches the real server, and everything between them is relayed,
+A security proxy for MCP stdio servers. Your client launches `effectgate`,
+`effectgate` launches the real server, and everything between them is relayed,
 recorded, and — depending on the level — refused.
 
 One static binary. No account, no network calls, no runtime to install.
 
 ```
-Claude Desktop ──stdio── mcp-guard ──stdio── npx server-filesystem
+Claude Desktop ──stdio── effectgate ──stdio── npx server-filesystem
                              │
                              └── session log, policy, tool pinning
 ```
@@ -42,36 +42,36 @@ of ordinary use**. Target: under one.
 
 ## Install
 
-Download a binary from [releases](https://github.com/pterbsgame-netizen/mcp-guard/releases),
+Download a binary from [releases](https://github.com/pterbsgame-netizen/effectgate/releases),
 or:
 
 ```bash
-go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest
+go install github.com/pterbsgame-netizen/effectgate/cmd/effectgate@latest
 ```
 
 Then put it in front of the servers you already run:
 
 ```bash
-mcp-guard install --dry-run
+effectgate install --dry-run
 ```
 
 That finds the client configs on this machine, prints what it would change, and
 writes nothing. Drop `--dry-run` to apply it. Every file is copied aside first,
-and `mcp-guard uninstall` puts the original commands back — it reads them out of
+and `effectgate uninstall` puts the original commands back — it reads them out of
 the wrapped ones, so it does not need the backup to work.
 
 Only the declarations it actually changes are rewritten, spliced back into the
 original bytes. Whatever else lives in those files — caches, window positions,
 keys it has never heard of — comes out identical.
 
-By hand it is the same edit: replace the server command with `mcp-guard`, then
+By hand it is the same edit: replace the server command with `effectgate`, then
 `--`, then the command you had before.
 
 ```json
 {
   "mcpServers": {
     "filesystem": {
-      "command": "C:\\path\\to\\mcp-guard.exe",
+      "command": "C:\\path\\to\\effectgate.exe",
       "args": [
         "--policy", "default", "--",
         "npx", "-y", "@modelcontextprotocol/server-filesystem", "C:\\Users\\me\\dev"
@@ -82,7 +82,7 @@ By hand it is the same edit: replace the server command with `mcp-guard`, then
 ```
 
 Restart the client. If it worked, nothing changed: same tools, same calls, same
-errors — and a session log appears under `~/.mcp-guard/sessions`.
+errors — and a session log appears under `~/.effectgate/sessions`.
 
 **Start in observe mode**, which is the default. It records what it would have
 refused and refuses nothing. Live with it for a week, read the numbers, then
@@ -93,10 +93,10 @@ switch enforcement on.
 ### Pins what a server advertises
 
 ```bash
-mcp-guard approve -- npx -y @modelcontextprotocol/server-filesystem ~/dev
+effectgate approve -- npx -y @modelcontextprotocol/server-filesystem ~/dev
 ```
 
-Writes `mcp-guard.lock` with each tool's name, description and input schema.
+Writes `effectgate.lock` with each tool's name, description and input schema.
 Commit it: a tool that later rewrites its description or widens its schema shows
 up in a diff during review.
 
@@ -104,13 +104,13 @@ Schemas are canonicalised (RFC 8785) before hashing, so a server that
 re-serialises its output between runs is not mistaken for one that changed it —
 which is the difference between a useful check and one you turn off on day two.
 
-`mcp-guard approve --diff` reports changes and exits non-zero, so it can gate a
+`effectgate approve --diff` reports changes and exits non-zero, so it can gate a
 build.
 
 ### Decides what a call may do
 
 ```bash
-mcp-guard --policy default -enforce -- npx -y ... 
+effectgate --policy default -enforce -- npx -y ... 
 ```
 
 Paths are resolved **before** they are matched, so there is no spelling that
@@ -159,9 +159,9 @@ zero; as a reason to be stricter about effects afterwards it is real.
 ### Guards the config itself
 
 ```bash
-mcp-guard verify --write   # record
-mcp-guard verify           # check, non-zero if changed
-mcp-guard watch            # keep watching
+effectgate verify --write   # record
+effectgate verify           # check, non-zero if changed
+effectgate watch            # keep watching
 ```
 
 This lives outside the traffic path deliberately: the proxy is a line in the
@@ -188,9 +188,9 @@ prefix, which would strip configuration variables that merely share a word.
 | `strict` | **refused** | **refused** |
 
 ```bash
-mcp-guard -enforce -- ...          # deny only
-mcp-guard -enforce=strict -- ...   # confirm too
-mcp-guard -enforce=off -- ...      # back to observing
+effectgate -enforce -- ...          # deny only
+effectgate -enforce=strict -- ...   # confirm too
+effectgate -enforce=off -- ...      # back to observing
 ```
 
 The two lists are not the same kind of thing. `deny` covers credentials, agent
@@ -202,20 +202,20 @@ same day.
 ### If it goes wrong
 
 ```bash
-MCPGUARD_OFF=1
+EFFECTGATE_OFF=1
 ```
 
-Set that in the client's environment and mcp-guard relays with no checks at all.
+Set that in the client's environment and effectgate relays with no checks at all.
 It is read before any config file is opened, so a broken policy — otherwise a
 refusal to start, and therefore a server that never appears in your client —
-cannot cost you your tools. Only affirmative values count, so `MCPGUARD_OFF=0`
+cannot cost you your tools. Only affirmative values count, so `EFFECTGATE_OFF=0`
 does not disarm it.
 
 ## Reading it back
 
 ```bash
-mcp-guard replay      # human-readable transcript of recorded sessions
-mcp-guard eval --attack corpus/attack --benign ~/.mcp-guard/sessions
+effectgate replay      # human-readable transcript of recorded sessions
+effectgate eval --attack corpus/attack --benign ~/.effectgate/sessions
 ```
 
 `replay` is offline and deterministic: no server is started, so the same log
@@ -269,11 +269,11 @@ instance. It requires an account and an API token before any scan runs.
 
 The overlap is smaller than it looks. Agent Scan answers "what is installed and
 does any of it look dangerous", across far more surface than this will ever
-cover. mcp-guard answers "this call is about to write to `~/.ssh` — no", which
+cover. effectgate answers "this call is about to write to `~/.ssh` — no", which
 is a different question at a different moment.
 
 Worth knowing: scanning a config **executes** the servers listed in it, to read
-their tool descriptions. `mcp-guard approve` starts only the one server named on
+their tool descriptions. `effectgate approve` starts only the one server named on
 its command line.
 
 *(From reading its documentation, not from running it.)*
@@ -281,7 +281,7 @@ its command line.
 ## Build from source
 
 ```bash
-go build -o dist/mcp-guard ./cmd/mcp-guard
+go build -o dist/effectgate ./cmd/effectgate
 go test ./...
 ```
 
@@ -296,7 +296,7 @@ Dependencies: `golang.org/x/sys` (Windows ACLs on the session log),
 
 ## A note on the session log
 
-`~/.mcp-guard/sessions` holds the verbatim content of every tool call and every
+`~/.effectgate/sessions` holds the verbatim content of every tool call and every
 tool result — file contents, API responses, any credential the agent happened to
 read. It is one file per run, restricted to the owning user, and rotated. Treat
 it like a password file and do not paste it into an issue.

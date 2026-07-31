@@ -1,5 +1,5 @@
-// Command mcp-guard wraps an MCP stdio server: the client launches mcp-guard,
-// mcp-guard launches the real server, and everything between them is relayed
+// Command effectgate wraps an MCP stdio server: the client launches effectgate,
+// effectgate launches the real server, and everything between them is relayed
 // unchanged and recorded.
 //
 // Through stage 1 it blocks nothing. It is a tap, not a guard, despite the name.
@@ -19,40 +19,40 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/cfg"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/detect"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/eval"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/probe"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/replay"
+	"github.com/pterbsgame-netizen/effectgate/internal/cfg"
+	"github.com/pterbsgame-netizen/effectgate/internal/detect"
+	"github.com/pterbsgame-netizen/effectgate/internal/eval"
+	"github.com/pterbsgame-netizen/effectgate/internal/pin"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/probe"
+	"github.com/pterbsgame-netizen/effectgate/internal/proxy"
+	"github.com/pterbsgame-netizen/effectgate/internal/replay"
 )
 
-const usage = `mcp-guard - a recording pass-through for MCP stdio servers.
+const usage = `effectgate - a recording pass-through for MCP stdio servers.
 
 usage:
-  mcp-guard [flags] -- <server-command> [server-args...]
-  mcp-guard install [--dry-run] [config-file...]
-  mcp-guard uninstall [config-file...]
-  mcp-guard approve [flags] -- <server-command> [server-args...]
-  mcp-guard replay [session.jsonl | log-dir]
-  mcp-guard verify [--write] [config-file...]
-  mcp-guard watch [config-file...]
-  mcp-guard eval [--attack dir] [--benign log-or-dir]
-  mcp-guard version
+  effectgate [flags] -- <server-command> [server-args...]
+  effectgate install [--dry-run] [config-file...]
+  effectgate uninstall [config-file...]
+  effectgate approve [flags] -- <server-command> [server-args...]
+  effectgate replay [session.jsonl | log-dir]
+  effectgate verify [--write] [config-file...]
+  effectgate watch [config-file...]
+  effectgate eval [--attack dir] [--benign log-or-dir]
+  effectgate version
 
 examples:
-  mcp-guard install --dry-run
-  mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
-  mcp-guard replay
+  effectgate install --dry-run
+  effectgate -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
+  effectgate replay
 
 flags:
 `
 
 // version is stamped at build time:
 //
-//	go build -ldflags "-X main.version=v0.1.0" ./cmd/mcp-guard
+//	go build -ldflags "-X main.version=v0.1.0" ./cmd/effectgate
 //
 // A security tool that cannot say which build it is makes every bug report a
 // guess, so the default says plainly that it was not stamped rather than
@@ -63,7 +63,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version", "--version", "-version":
-			fmt.Printf("mcp-guard %s %s/%s %s\n",
+			fmt.Printf("effectgate %s %s/%s %s\n",
 				version, runtime.GOOS, runtime.GOARCH, runtime.Version())
 			return
 		case "replay":
@@ -85,12 +85,12 @@ func main() {
 	os.Exit(runProxy())
 }
 
-const evalUsage = `mcp-guard eval - measure the rules against corpora.
+const evalUsage = `effectgate eval - measure the rules against corpora.
 
 usage:
-  mcp-guard eval [--attack dir] [--benign log-or-dir] [--policy p] [--rules r]
+  effectgate eval [--attack dir] [--benign log-or-dir] [--policy p] [--rules r]
 
-  mcp-guard eval --attack corpus/attack --benign ~/.mcp-guard/sessions
+  effectgate eval --attack corpus/attack --benign ~/.effectgate/sessions
 
 Recall on the attack corpus is easy to move and easy to fool yourself with. The
 number that decides whether the tool survives is the false positive rate on real
@@ -123,7 +123,7 @@ func runEval(args []string) int {
 	if *rulesPath != "default" {
 		var err error
 		if rules, err = detect.Load(*rulesPath); err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 	}
@@ -131,7 +131,7 @@ func runEval(args []string) int {
 	if *policyPath != "default" {
 		var err error
 		if rulesForPolicy, err = policy.Load(*policyPath); err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 	}
@@ -140,7 +140,7 @@ func runEval(args []string) int {
 	if *attackDir != "" {
 		a, err := eval.Attack(*attackDir, rules)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 		attack = &a
@@ -153,7 +153,7 @@ func runEval(args []string) int {
 	case errors.Is(err, fs.ErrNotExist) && *excludeFile == eval.DefaultExcludeFile:
 		// The conventional file is optional; a named one that is missing is not.
 	default:
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
@@ -161,7 +161,7 @@ func runEval(args []string) int {
 	if *benignPath != "" {
 		b, err := eval.Benign(*benignPath, rules, rulesForPolicy, patterns)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 		benign = &b
@@ -171,19 +171,19 @@ func runEval(args []string) int {
 	return 0
 }
 
-const configUsage = `mcp-guard %s - guard the client configs that decide which MCP servers run.
+const configUsage = `effectgate %s - guard the client configs that decide which MCP servers run.
 
 usage:
-  mcp-guard verify [flags] [config-file...]
-  mcp-guard watch  [flags] [config-file...]
+  effectgate verify [flags] [config-file...]
+  effectgate watch  [flags] [config-file...]
 
 With no files given, the known client configs on this machine are used.
 
 Record the current state first, then check against it:
 
-  mcp-guard verify --write
-  mcp-guard verify
-  mcp-guard watch
+  effectgate verify --write
+  effectgate verify
+  effectgate watch
 
 Only the MCP server declarations are recorded, never whole files: clients keep
 caches and window positions in the same files and rewrite them constantly.
@@ -217,19 +217,19 @@ func runVerify(args []string) int {
 		paths = cfg.Discover()
 	}
 	if len(paths) == 0 {
-		fmt.Fprintln(os.Stderr, "mcp-guard: no client configs found; name them explicitly")
+		fmt.Fprintln(os.Stderr, "effectgate: no client configs found; name them explicitly")
 		return 1
 	}
 
 	current, err := cfg.Snapshot(paths)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
 	if *write {
 		if err := current.Save(*baselinePath); err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 		var servers int
@@ -243,11 +243,11 @@ func runVerify(args []string) int {
 
 	approved, err := cfg.LoadBaseline(*baselinePath)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(os.Stderr, "mcp-guard: no baseline at %s. Record one with:\n  mcp-guard verify --write\n", *baselinePath)
+		fmt.Fprintf(os.Stderr, "effectgate: no baseline at %s. Record one with:\n  effectgate verify --write\n", *baselinePath)
 		return 1
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
@@ -267,11 +267,11 @@ func runWatch(args []string) int {
 
 	approved, err := cfg.LoadBaseline(*baselinePath)
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(os.Stderr, "mcp-guard: no baseline at %s. Record one with:\n  mcp-guard verify --write\n", *baselinePath)
+		fmt.Fprintf(os.Stderr, "effectgate: no baseline at %s. Record one with:\n  effectgate verify --write\n", *baselinePath)
 		return 1
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
@@ -291,7 +291,7 @@ func runWatch(args []string) int {
 		cfg.Report(os.Stdout, changes)
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 	return 0
@@ -309,13 +309,13 @@ func union(a, b []string) []string {
 	return out
 }
 
-const approveUsage = `mcp-guard approve - record what a server advertises, so a later change is visible.
+const approveUsage = `effectgate approve - record what a server advertises, so a later change is visible.
 
 usage:
-  mcp-guard approve [flags] -- <server-command> [server-args...]
+  effectgate approve [flags] -- <server-command> [server-args...]
 
-  mcp-guard approve -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
-  mcp-guard approve --diff -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
+  effectgate approve -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
+  effectgate approve --diff -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\dev
 
 The lock file is meant to be committed alongside the project it covers, so that
 a tool changing its description or widening its schema shows up in review.
@@ -344,7 +344,7 @@ func runApprove(args []string) int {
 
 	res, err := probe.Run(context.Background(), argv, nil, *timeout)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		if res != nil && res.Stderr != "" {
 			fmt.Fprintf(os.Stderr, "server said:\n%s\n", res.Stderr)
 		}
@@ -359,7 +359,7 @@ func runApprove(args []string) int {
 		EnvKeys: splitList(*pinEnv),
 	}, res.Tools)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
@@ -367,11 +367,11 @@ func runApprove(args []string) int {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		if *diffOnly {
-			fmt.Fprintf(os.Stderr, "mcp-guard: no lock at %s to compare against\n", *lockPath)
+			fmt.Fprintf(os.Stderr, "effectgate: no lock at %s to compare against\n", *lockPath)
 			return 1
 		}
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	default:
 		changes := pin.Diff(existing, observed)
@@ -388,7 +388,7 @@ func runApprove(args []string) int {
 		return 0
 	}
 	if err := observed.Save(*lockPath); err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "approved %d tools into %s\n", len(observed.Tools), *lockPath)
@@ -414,7 +414,7 @@ func runReplay(args []string) int {
 	if len(args) == 1 {
 		path = args[0]
 	} else if len(args) > 1 {
-		fmt.Fprintln(os.Stderr, "usage: mcp-guard replay [session.jsonl | log-dir]")
+		fmt.Fprintln(os.Stderr, "usage: effectgate replay [session.jsonl | log-dir]")
 		return 2
 	}
 	// Buffered: a replayed session is thousands of small writes, and on a
@@ -428,11 +428,11 @@ func runReplay(args []string) int {
 	case errors.Is(err, fs.ErrNotExist):
 		// The common first run: nothing has been recorded yet. The raw
 		// GetFileAttributesEx error tells the user nothing useful.
-		fmt.Fprintf(os.Stderr, "mcp-guard: no sessions recorded at %s yet.\n", path)
-		fmt.Fprintln(os.Stderr, "  Wire mcp-guard into your MCP client and use it once, then try again.")
+		fmt.Fprintf(os.Stderr, "effectgate: no sessions recorded at %s yet.\n", path)
+		fmt.Fprintln(os.Stderr, "  Wire effectgate into your MCP client and use it once, then try again.")
 		return 1
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 	return 0
@@ -444,7 +444,7 @@ func runProxy() int {
 	grace := flag.Duration("grace", 5*time.Second, "per-step grace period when shutting the server down")
 	maxLog := flag.Int64("log-max-bytes", proxy.DefaultMaxLogBytes, "rotate the session log past this size; 0 disables rotation")
 	callTTL := flag.Duration("call-ttl", 5*time.Minute, "how long an unanswered request is remembered before it is written off")
-	lockPath := flag.String("lock", "", "check the server against this lock file (see: mcp-guard approve)")
+	lockPath := flag.String("lock", "", "check the server against this lock file (see: effectgate approve)")
 	var enforce enforceFlag
 	flag.Var(&enforce, "enforce", "enforcement level: observe, enforce (deny only) or strict (confirm too); bare -enforce means enforce")
 	policyPath := flag.String("policy", "", `policy file; "default" uses the built-in one`)
@@ -461,7 +461,7 @@ func runProxy() int {
 		return 2
 	}
 	if misparsedEnforce(argv) {
-		fmt.Fprintf(os.Stderr, "mcp-guard: -enforce takes its value with an equals sign: -enforce=%s\n", argv[0])
+		fmt.Fprintf(os.Stderr, "effectgate: -enforce takes its value with an equals sign: -enforce=%s\n", argv[0])
 		return 2
 	}
 
@@ -471,7 +471,7 @@ func runProxy() int {
 	disabled := off(os.Getenv)
 	if disabled {
 		fmt.Fprintln(os.Stderr,
-			"mcp-guard: "+killSwitch+" is set: relaying with no checks at all - no pin check, no policy, no content scan")
+			"effectgate: "+killSwitch+" is set: relaying with no checks at all - no pin check, no policy, no content scan")
 	}
 
 	open := func() (*proxy.SessionLog, error) {
@@ -485,15 +485,15 @@ func runProxy() int {
 	case errors.Is(err, proxy.ErrNotSecured):
 		// Worth saying out loud - the log holds every tool result verbatim -
 		// but not worth refusing to start and breaking the client's server.
-		fmt.Fprintf(os.Stderr, "mcp-guard: warning: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: warning: %v\n", err)
 	case err != nil && disabled:
 		// Under the kill switch nothing is allowed to stop the start. The log
 		// is still worth keeping when it can be kept, since losing the record
 		// of the session the guard misbehaved in is the opposite of useful.
-		fmt.Fprintf(os.Stderr, "mcp-guard: warning: no session log: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: warning: no session log: %v\n", err)
 		log = nil
 	case err != nil:
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 		return 1
 	}
 
@@ -507,8 +507,8 @@ func runProxy() int {
 		if err != nil {
 			// A lock that cannot be read is a refusal to start: the user asked
 			// for this server to be checked, and starting unchecked would be
-			// worse than not starting. MCPGUARD_OFF is the way out.
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			// worse than not starting. EFFECTGATE_OFF is the way out.
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 	}
@@ -523,7 +523,7 @@ func runProxy() int {
 		if err != nil {
 			// Same reasoning as the lock: the user asked for this server to be
 			// governed, and running it ungoverned is worse than not running it.
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 	}
@@ -536,7 +536,7 @@ func runProxy() int {
 	case *rulesPath != "":
 		signatures, err = detect.Load(*rulesPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", err)
+			fmt.Fprintf(os.Stderr, "effectgate: %v\n", err)
 			return 1
 		}
 	case rules != nil:
@@ -560,10 +560,10 @@ func runProxy() int {
 		Provenance: map[string]any{"from": from},
 	})
 	if runErr != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: %v\n", runErr)
+		fmt.Fprintf(os.Stderr, "effectgate: %v\n", runErr)
 	}
 	if err := log.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "mcp-guard: closing log: %v\n", err)
+		fmt.Fprintf(os.Stderr, "effectgate: closing log: %v\n", err)
 	}
 	// Exit with the server's code: to the client we must look like the server.
 	return res.ExitCode
@@ -575,11 +575,11 @@ func runProxy() int {
 // refusal to start means the MCP server simply does not appear in the client,
 // with the reason only on stderr. One environment variable gets the tools back
 // without editing a config or rebuilding anything.
-const killSwitch = "MCPGUARD_OFF"
+const killSwitch = "EFFECTGATE_OFF"
 
 // off reports whether the kill switch is set.
 //
-// Only affirmative values count. MCPGUARD_OFF=0 leaving the guard disabled is
+// Only affirmative values count. EFFECTGATE_OFF=0 leaving the guard disabled is
 // the mistake everyone makes with a variable named like this.
 func off(getenv func(string) string) bool {
 	switch strings.ToLower(strings.TrimSpace(getenv(killSwitch))) {
@@ -647,7 +647,7 @@ func misparsedEnforce(args []string) bool {
 func defaultLogDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "mcp-guard-sessions"
+		return "effectgate-sessions"
 	}
-	return filepath.Join(home, ".mcp-guard", "sessions")
+	return filepath.Join(home, ".effectgate", "sessions")
 }

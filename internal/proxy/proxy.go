@@ -18,10 +18,10 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/detect"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/detect"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/pin"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
 // Direction labels recorded in the session log.
@@ -133,7 +133,7 @@ func Run(ctx context.Context, o Options) (Result, error) {
 	// notices share a second one for the same reason.
 	notices := &syncWriter{w: o.Stderr}
 	notice := func(format string, args ...any) {
-		fmt.Fprintf(notices, "mcp-guard: "+format+"\n", args...)
+		fmt.Fprintf(notices, "effectgate: "+format+"\n", args...)
 	}
 
 	cmd := exec.Command(o.Argv[0], o.Argv[1:]...)

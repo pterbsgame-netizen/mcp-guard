@@ -21,7 +21,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/normalize"
+	"github.com/pterbsgame-netizen/effectgate/internal/normalize"
 	"gopkg.in/yaml.v3"
 )
 

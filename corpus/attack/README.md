@@ -11,7 +11,7 @@ worked examples for anyone reading the ruleset.
 
 The genuinely informative measurement is the false-positive rate on real
 traffic, which lives nowhere near this directory and cannot be manufactured. See
-`mcp-guard eval --benign`.
+`effectgate eval --benign`.
 
 Sources are named in each file. The text is reconstructed to the shape of the
 public write-up, not copied from a victim.

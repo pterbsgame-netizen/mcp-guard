@@ -21,7 +21,7 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/canon"
+	"github.com/pterbsgame-netizen/effectgate/internal/canon"
 )
 
 // Server is one MCP server declaration found in a client config.

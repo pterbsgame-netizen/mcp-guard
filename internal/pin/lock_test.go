@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
 )
 
 func tool(name, desc, schema string) mcp.Tool {

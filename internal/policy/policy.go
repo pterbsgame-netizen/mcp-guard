@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/fspath"
+	"github.com/pterbsgame-netizen/effectgate/internal/fspath"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,7 +26,7 @@ import (
 const Version = 1
 
 // DefaultName is the conventional file name.
-const DefaultName = "mcp-guard.policy.yaml"
+const DefaultName = "effectgate.policy.yaml"
 
 //go:embed default.yaml
 var defaultYAML []byte

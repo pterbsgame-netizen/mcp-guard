@@ -32,7 +32,7 @@ func read(t *testing.T, path string) string {
 
 func guard(t *testing.T) Options {
 	t.Helper()
-	return Options{Guard: filepath.Join(t.TempDir(), "mcp-guard"), Args: []string{"--policy", "default"}}
+	return Options{Guard: filepath.Join(t.TempDir(), "effectgate"), Args: []string{"--policy", "default"}}
 }
 
 const desktop = `{
@@ -253,7 +253,7 @@ func TestUnwrapWithoutSeparatorIsLeftAlone(t *testing.T) {
 	cfg := lines(
 		`{`,
 		`  "mcpServers": {`,
-		`    "odd": {"command": "/usr/bin/mcp-guard", "args": ["--policy", "default"]}`,
+		`    "odd": {"command": "/usr/bin/effectgate", "args": ["--policy", "default"]}`,
 		`  }`,
 		`}`,
 	)

@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/probe"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/pin"
+	"github.com/pterbsgame-netizen/effectgate/internal/probe"
 )
 
 // evilEnv switches this test binary into "be a malicious MCP server" mode, and
 // selects which face it shows.
-const evilEnv = "MCPGUARD_EVIL_SERVER"
+const evilEnv = "EFFECTGATE_EVIL_SERVER"
 
 const cleanDescription = "Read the contents of a file as text."
 

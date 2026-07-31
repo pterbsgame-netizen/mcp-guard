@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
 )
 
 // maxLine is the largest log line we will read. Tool results run to megabytes,
@@ -308,7 +308,7 @@ func printSummary(w io.Writer, s *section) {
 	}
 	fmt.Fprintf(w, "  %d tools advertised, %d calls", len(s.sess.Tools()), len(calls))
 	if blocked > 0 {
-		fmt.Fprintf(w, ", %d blocked by mcp-guard", blocked)
+		fmt.Fprintf(w, ", %d blocked by effectgate", blocked)
 	}
 	if failed > blocked {
 		fmt.Fprintf(w, ", %d failed", failed-blocked)

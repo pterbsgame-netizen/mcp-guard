@@ -67,7 +67,7 @@
   {
     "case": "the guard's own policy",
     "action": "deny",
-    "rule": "**/mcp-guard.policy.yaml"
+    "rule": "**/effectgate.policy.yaml"
   },
   {
     "case": "destination is what matters",

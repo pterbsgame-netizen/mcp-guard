@@ -1,7 +1,7 @@
 // Package probe performs the smallest possible MCP handshake against a stdio
 // server and reports what it advertises.
 //
-// This is the one place mcp-guard acts as a client rather than a pipe. It
+// This is the one place effectgate acts as a client rather than a pipe. It
 // exists so that approving a server does not require running a real agent
 // against it first.
 package probe
@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
 )
 
 // protocolVersion is what the probe asks for. A server that does not know it
@@ -72,7 +72,7 @@ func Run(ctx context.Context, argv, env []string, timeout time.Duration) (*Resul
 	initResult, err := s.call(ctx, 1, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "mcp-guard", "version": "0"},
+		"clientInfo":      map[string]any{"name": "effectgate", "version": "0"},
 	})
 	if err != nil {
 		res.Stderr = stderr.String()
@@ -188,7 +188,7 @@ func (s *session) call(ctx context.Context, id int, method string, params any) (
 					// We advertise no capabilities, so anything the server asks
 					// for is something we cannot provide. Say so, promptly.
 					_, _ = s.in.Write(mcp.NewError(m.ID, mcp.CodeMethodNotFound,
-						"mcp-guard probe supports no client capabilities"))
+						"effectgate probe supports no client capabilities"))
 				}
 			}
 		}

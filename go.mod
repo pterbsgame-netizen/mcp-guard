@@ -1,4 +1,4 @@
-module github.com/pterbsgame-netizen/mcp-guard
+module github.com/pterbsgame-netizen/effectgate
 
 go 1.25.0
 

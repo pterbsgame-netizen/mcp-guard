@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/normalize"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/normalize"
+	"github.com/pterbsgame-netizen/effectgate/internal/pin"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
 )
 
 // syncWriter serialises writes to a stream with more than one writer.
@@ -438,7 +438,7 @@ func (g *guard) inspect(m mcp.Message) gateResult {
 		if blocked {
 			g.countBlocked()
 			return gateResult{refuse: true,
-				reason: reason + ". Review it with: mcp-guard approve --diff -- <server command>"}
+				reason: reason + ". Review it with: effectgate approve --diff -- <server command>"}
 		}
 		g.announce(params.Name, "pin", reason)
 	}
@@ -471,10 +471,10 @@ func (g *guard) inspect(m mcp.Message) gateResult {
 	switch v.Action {
 	case policy.Deny:
 		return gateResult{refuse: true,
-			reason: fmt.Sprintf("blocked by mcp-guard: %s (rule %q)", v.Reason, v.Rule)}
+			reason: fmt.Sprintf("blocked by effectgate: %s (rule %q)", v.Reason, v.Rule)}
 	default:
 		return gateResult{refuse: true, reason: fmt.Sprintf(
-			"held by mcp-guard for confirmation: %s (rule %q). "+
+			"held by effectgate for confirmation: %s (rule %q). "+
 				"There is no way to ask you from here, so it was refused. "+
 				"Allow it with a policy rule, or drop back to -enforce (deny only).",
 			v.Reason, v.Rule)}

@@ -1,7 +1,7 @@
 # Sessions left out of the benign measurement.
 #
 # One pattern per line: a session id, or a glob matched against the log file
-# name. Read automatically by `mcp-guard eval --benign`.
+# name. Read automatically by `effectgate eval --benign`.
 #
 # Everything here is a run that deliberately exercised the guard. A probe
 # belongs in the attack corpus, not the benign one, and leaving it in ruins the

@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pterbsgame-netizen/mcp-guard/internal/mcp"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/pin"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/policy"
-	"github.com/pterbsgame-netizen/mcp-guard/internal/proxy"
+	"github.com/pterbsgame-netizen/effectgate/internal/mcp"
+	"github.com/pterbsgame-netizen/effectgate/internal/pin"
+	"github.com/pterbsgame-netizen/effectgate/internal/policy"
+	"github.com/pterbsgame-netizen/effectgate/internal/proxy"
 )
 
 // helperEnv marks a re-execution of this test binary as "be the MCP server".
-const helperEnv = "MCPGUARD_TEST_HELPER"
+const helperEnv = "EFFECTGATE_TEST_HELPER"
 
 // TestHelperServer is not a test. When the proxy re-executes this binary with
 // helperEnv set, this function plays the role of the MCP server: it echoes
@@ -285,18 +285,18 @@ func TestRotation(t *testing.T) {
 }
 
 // TestCorpusParses runs the parser over a real recorded session. It is skipped
-// unless MCPGUARD_CORPUS points at one, because the corpus is machine-specific
+// unless EFFECTGATE_CORPUS points at one, because the corpus is machine-specific
 // and never committed:
 //
-//	MCPGUARD_CORPUS=~/.mcp-guard/session.jsonl go test ./internal/proxy/
+//	EFFECTGATE_CORPUS=~/.effectgate/session.jsonl go test ./internal/proxy/
 //
 // This is the cheap half of the replay harness: every message the parser cannot
 // classify is a message stage 3 would have to make a policy decision about
 // blind.
 func TestCorpusParses(t *testing.T) {
-	path := os.Getenv("MCPGUARD_CORPUS")
+	path := os.Getenv("EFFECTGATE_CORPUS")
 	if path == "" {
-		t.Skip("set MCPGUARD_CORPUS to a session log to run this")
+		t.Skip("set EFFECTGATE_CORPUS to a session log to run this")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -343,7 +343,7 @@ func TestCorpusParses(t *testing.T) {
 
 // mcpServerEnv switches this binary into "be a minimal MCP server" mode; its
 // value is the description the single tool advertises.
-const mcpServerEnv = "MCPGUARD_TEST_MCP_SERVER"
+const mcpServerEnv = "EFFECTGATE_TEST_MCP_SERVER"
 
 const pinTestSchema = `{"type":"object","properties":{"path":{"type":"string"}},"required":["path"]}`
 
@@ -770,13 +770,13 @@ func TestObserveModeLetsItThrough(t *testing.T) {
 //
 // This is the half of the stage-3 criterion that decides whether the tool
 // survives: catching CurXecute is worth nothing if ordinary work also trips.
-// It is skipped unless MCPGUARD_CORPUS points at a log, and it reports how many
+// It is skipped unless EFFECTGATE_CORPUS points at a log, and it reports how many
 // calls it actually judged - a corpus with no tool calls in it proves nothing,
 // and saying so is the point.
 func TestCorpusPolicy(t *testing.T) {
-	path := os.Getenv("MCPGUARD_CORPUS")
+	path := os.Getenv("EFFECTGATE_CORPUS")
 	if path == "" {
-		t.Skip("set MCPGUARD_CORPUS to a session log to run this")
+		t.Skip("set EFFECTGATE_CORPUS to a session log to run this")
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -905,7 +905,7 @@ func TestStderrIsRelayedAndRecorded(t *testing.T) {
 
 // noisyEnv switches this binary into a server that only writes to stderr and
 // exits, the way a server with a broken dependency does.
-const noisyEnv = "MCPGUARD_TEST_NOISY"
+const noisyEnv = "EFFECTGATE_TEST_NOISY"
 
 func TestHelperNoisyServer(t *testing.T) {
 	if os.Getenv(noisyEnv) != "1" {

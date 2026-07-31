@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Use [private vulnerability reporting](https://github.com/pterbsgame-netizen/mcp-guard/security/advisories/new).
+Use [private vulnerability reporting](https://github.com/pterbsgame-netizen/effectgate/security/advisories/new).
 Please do not open a public issue for anything that lets a call through that
 policy should have refused.
 
@@ -14,9 +14,9 @@ within a week, not within an hour.
 
 ## Do not attach a raw session log
 
-`~/.mcp-guard/sessions/*.jsonl` holds every tool call and every tool result
+`~/.effectgate/sessions/*.jsonl` holds every tool call and every tool result
 verbatim: file contents, API responses, and any credential the agent happened to
-read along the way. Treat it like a password file. `mcp-guard replay` produces a
+read along the way. Treat it like a password file. `effectgate replay` produces a
 transcript you can read and trim before sending.
 
 ## Already known, please do not report as new
@@ -36,7 +36,7 @@ already have written down:
   built-in telemetry exfiltrates without a byte crossing the proxy.
 - **Content signatures can be evaded.** By design they only raise the taint
   level and can never block, so evading them is expected rather than surprising.
-- **`MCPGUARD_OFF=1` disables all checks.** It is an emergency switch for the
+- **`EFFECTGATE_OFF=1` disables all checks.** It is an emergency switch for the
   person running the client, and it is deliberately not something the policy
   file can take away.
 
