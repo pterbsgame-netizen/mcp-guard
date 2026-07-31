@@ -49,8 +49,23 @@ or:
 go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest
 ```
 
-Then put it in front of a server you already run. Claude Desktop,
-`claude_desktop_config.json`:
+Then put it in front of the servers you already run:
+
+```bash
+mcp-guard install --dry-run
+```
+
+That finds the client configs on this machine, prints what it would change, and
+writes nothing. Drop `--dry-run` to apply it. Every file is copied aside first,
+and `mcp-guard uninstall` puts the original commands back — it reads them out of
+the wrapped ones, so it does not need the backup to work.
+
+Only the declarations it actually changes are rewritten, spliced back into the
+original bytes. Whatever else lives in those files — caches, window positions,
+keys it has never heard of — comes out identical.
+
+By hand it is the same edit: replace the server command with `mcp-guard`, then
+`--`, then the command you had before.
 
 ```json
 {
@@ -66,9 +81,8 @@ Then put it in front of a server you already run. Claude Desktop,
 }
 ```
 
-Everything after `--` is the command you had before. Restart the client. If it
-worked, nothing changed: same tools, same calls, same errors — and a session log
-appears under `~/.mcp-guard/sessions`.
+Restart the client. If it worked, nothing changed: same tools, same calls, same
+errors — and a session log appears under `~/.mcp-guard/sessions`.
 
 **Start in observe mode**, which is the default. It records what it would have
 refused and refuses nothing. Live with it for a week, read the numbers, then

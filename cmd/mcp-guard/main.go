@@ -33,6 +33,8 @@ const usage = `mcp-guard - a recording pass-through for MCP stdio servers.
 
 usage:
   mcp-guard [flags] -- <server-command> [server-args...]
+  mcp-guard install [--dry-run] [config-file...]
+  mcp-guard uninstall [config-file...]
   mcp-guard approve [flags] -- <server-command> [server-args...]
   mcp-guard replay [session.jsonl | log-dir]
   mcp-guard verify [--write] [config-file...]
@@ -41,6 +43,7 @@ usage:
   mcp-guard version
 
 examples:
+  mcp-guard install --dry-run
   mcp-guard -- npx -y @modelcontextprotocol/server-filesystem C:\Users\me\tmp
   mcp-guard replay
 
@@ -73,6 +76,10 @@ func main() {
 			os.Exit(runWatch(os.Args[2:]))
 		case "eval":
 			os.Exit(runEval(os.Args[2:]))
+		case "install":
+			os.Exit(runInstall(os.Args[2:], false))
+		case "uninstall":
+			os.Exit(runInstall(os.Args[2:], true))
 		}
 	}
 	os.Exit(runProxy())
