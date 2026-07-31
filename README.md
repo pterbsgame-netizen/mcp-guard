@@ -230,18 +230,27 @@ beside it, because a zero over two calls is not a rate.
 ## Measured, not asserted
 
 On the development machine, at `enforce`: **28 tool calls of ordinary work over
-two days, zero blocks.**
+75 hours, zero blocks.** Seventeen were allowed outright; eleven were confirms,
+which `enforce` records and relays.
 
 Deliberate probes are excluded from that count and listed in
 `corpus/excluded-sessions.txt`; including them gives 11.1 blocks per week, which
-is four correct refusals of attacks rather than friction to be tuned away.
+is five correct refusals of attacks rather than friction to be tuned away.
 
-`strict` produces roughly 30 refusals a week in the same workload, all of it one
-exec-class tool. That does not improve with more data — it improves when a
-confirm can be answered instead of refused.
+`strict` produces 24.5 refusals a week in the same workload, every one of them
+`execute_blender_code` hitting the exec class. That does not improve with more
+data — it improves when a confirm can be answered instead of refused.
 
-This is one machine and one workload. Treat it as a starting point for your own
-measurement, not as a result.
+Every number above comes out of one command, so it can be checked instead of
+believed:
+
+```bash
+effectgate eval --benign ~/.effectgate/sessions
+```
+
+This is one machine and one workload, measured over 28 calls. Treat it as a
+starting point for your own measurement, not as a result — and if the figures
+here ever disagree with what that command prints, the command is right.
 
 ## What it does not do
 
