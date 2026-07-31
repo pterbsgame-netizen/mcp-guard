@@ -740,10 +740,19 @@
     </p>
 <pre>go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest</pre>
     <p>
-      Дальше — вручную, один раз: команду сервера заменяют на <code>mcp-guard</code> плюс
-      исходную команду. Сам он в конфигурацию не прописывается никогда, поэтому нет окна,
-      в котором падение оставит после себя испорченный <code>mcp.json</code>.
-      Для Claude Desktop это <code>%APPDATA%\Claude\claude_desktop_config.json</code>:
+      Дальше — поставить его перед серверами, которые уже запущены. <code>install</code> находит
+      конфиги клиентов на этой машине, печатает, что собирается изменить, и не пишет ничего, пока
+      не убрать <code>--dry-run</code>. Переписываются только те объявления, которые меняются, —
+      остальное в этих файлах остаётся байт в байт, — а <code>uninstall</code> достаёт исходные
+      команды из обёрнутых.
+    </p>
+<pre>mcp-guard install --dry-run
+mcp-guard install
+mcp-guard uninstall</pre>
+    <p>
+      Вручную это та же правка, один раз: команду сервера заменяют на <code>mcp-guard</code> плюс
+      исходную команду. Для Claude Desktop это
+      <code>%APPDATA%\Claude\claude_desktop_config.json</code>:
     </p>
 <pre>{
   <span class="k">"mcpServers"</span>: {

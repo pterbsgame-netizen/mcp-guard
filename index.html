@@ -741,10 +741,19 @@
     </p>
 <pre>go install github.com/pterbsgame-netizen/mcp-guard/cmd/mcp-guard@latest</pre>
     <p>
-      The rest is manual and happens once: the server command is replaced by <code>mcp-guard</code>
-      plus the original command. It never writes itself into the configuration, so there is no
-      window in which a crash leaves a mangled <code>mcp.json</code> behind. For Claude Desktop
-      that file is <code>%APPDATA%\Claude\claude_desktop_config.json</code>:
+      Then put it in front of the servers you already run. <code>install</code> finds the client
+      configs on this machine, prints what it would change, and writes nothing until you drop
+      <code>--dry-run</code>. Only the declarations that change are rewritten — everything else in
+      those files comes out byte for byte identical — and <code>uninstall</code> reads the original
+      commands back out of the wrapped ones.
+    </p>
+<pre>mcp-guard install --dry-run
+mcp-guard install
+mcp-guard uninstall</pre>
+    <p>
+      By hand it is the same edit, once: the server command is replaced by <code>mcp-guard</code>
+      plus the original command. For Claude Desktop that file is
+      <code>%APPDATA%\Claude\claude_desktop_config.json</code>:
     </p>
 <pre>{
   <span class="k">"mcpServers"</span>: {
